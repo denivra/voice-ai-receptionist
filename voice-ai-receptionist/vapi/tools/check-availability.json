@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "_meta": {
+    "name": "check_availability",
+    "version": "1.0.0",
+    "description": "Vapi tool definition for checking restaurant table availability",
+    "reference": "Section 2.2.1 of Restaurant AI Automation Master Guide"
+  },
+
+  "type": "function",
+  "async": false,
+
+  "function": {
+    "name": "check_availability",
+    "description": "Check if a table is available for a specific date, time, and party size. Returns availability status and up to 3 alternative time slots if the requested time is unavailable. IMPORTANT: You MUST call this tool before confirming ANY reservation time to the caller. Never assume availability without checking.",
+
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "search_datetime": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The requested reservation date and time in ISO 8601 format. Examples: '2024-03-15T19:00:00' for 7 PM on March 15th, '2024-12-31T20:30:00' for 8:30 PM on New Year's Eve. Convert natural language like 'Friday at 7' to the appropriate ISO format based on the current date."
+        },
+        "party_size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20,
+          "description": "The total number of guests in the party, including children. If caller says 'two adults and a baby', use 3. For parties over 8, consider suggesting transfer to events team instead."
+        },
+        "seating_preference": {
+          "type": "string",
+          "enum": ["any", "indoor", "outdoor", "bar", "patio", "private"],
+          "default": "any",
+          "description": "The caller's preferred seating area. Use 'any' (default) unless the caller specifically requests a location. 'patio' and 'outdoor' may be treated as equivalent. 'private' is for private dining rooms (usually requires minimum party size)."
+        }
+      },
+      "required": ["search_datetime", "party_size"],
+      "additionalProperties": false
+    }
+  },
+
+  "server": {
+    "url": "{{N8N_WEBHOOK_URL}}/webhook/vapi-restaurant",
+    "secret": "{{VAPI_WEBHOOK_SECRET}}",
+    "timeoutSeconds": 5,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Tool-Name": "check_availability",
+      "X-Tool-Version": "1.0.0"
+    }
+  },
+
+  "messages": [
+    {
+      "type": "request-start",
+      "content": "Let me check our availability for you..."
+    },
+    {
+      "type": "request-response-delayed",
+      "content": "Still checking, one moment...",
+      "timingMilliseconds": 3000
+    },
+    {
+      "type": "request-complete",
+      "content": ""
+    },
+    {
+      "type": "request-failed",
+      "content": "I'm having trouble accessing our reservation system right now. Can I take your phone number and have someone call you back within a few minutes to complete the booking?"
+    }
+  ],
+
+  "_response_schema": {
+    "description": "Expected response format from n8n webhook",
+    "type": "object",
+    "properties": {
+      "results": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "toolCallId": {
+              "type": "string",
+              "description": "Echo back the toolCallId from the request"
+            },
+            "result": {
+              "type": "string",
+              "description": "JSON string containing the availability result"
+            }
+          }
+        }
+      }
+    },
+    "example": {
+      "results": [{
+        "toolCallId": "call_abc123",
+        "result": "{\"status\":\"available\",\"exact_slot\":{\"datetime\":\"2024-03-15T19:00:00\",\"capacity\":4,\"seating_type\":\"indoor\"},\"message\":\"Great news! I have 7 PM available for a party of 4.\"}"
+      }]
+    },
+    "status_values": {
+      "available": "Requested slot is available - proceed to booking",
+      "alternatives": "Requested slot unavailable, alternatives provided",
+      "partial_match": "Different seating type available at requested time",
+      "closed": "Restaurant is closed at requested time",
+      "blocked": "Date is blocked (holiday, private event)",
+      "unavailable": "No availability found"
+    }
+  },
+
+  "_usage_examples": [
+    {
+      "scenario": "Caller requests Friday at 7pm for 4 people",
+      "parameters": {
+        "search_datetime": "2024-03-15T19:00:00",
+        "party_size": 4,
+        "seating_preference": "any"
+      }
+    },
+    {
+      "scenario": "Caller wants outdoor seating for 2 tomorrow at noon",
+      "parameters": {
+        "search_datetime": "2024-03-14T12:00:00",
+        "party_size": 2,
+        "seating_preference": "outdoor"
+      }
+    },
+    {
+      "scenario": "Large party checking for private room",
+      "parameters": {
+        "search_datetime": "2024-04-01T18:30:00",
+        "party_size": 12,
+        "seating_preference": "private"
+      }
+    }
+  ],
+
+  "_integration_notes": {
+    "timeout": "5 seconds max for real-time voice - if exceeds, fallback message plays",
+    "retries": "Tool will not retry automatically - handled by n8n with 2 retries",
+    "error_handling": "On error, offer to create callback rather than abandoning call",
+    "caching": "Results are not cached - always check real-time availability",
+    "rate_limiting": "No rate limiting on this tool - Supabase handles connection pooling"
+  }
+}

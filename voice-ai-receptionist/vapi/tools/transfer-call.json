@@ -1,0 +1,277 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "_meta": {
+    "name": "transfer_call",
+    "version": "1.0.0",
+    "description": "Vapi tool definition for transferring calls to human staff",
+    "reference": "Section 2.2.3 of Restaurant AI Automation Master Guide"
+  },
+
+  "type": "function",
+  "async": false,
+
+  "function": {
+    "name": "transfer_call",
+    "description": "Transfer the call to a human staff member. MANDATORY TRANSFERS (call immediately, no exceptions): 1) Allergy mentions - any mention of 'allergy', 'allergic', 'anaphylactic', 'epipen', or asking if food is 'safe' for dietary reasons. 2) Large parties over 8 guests. 3) Caller explicitly asks for manager/human. ALWAYS explain to the caller why they're being transferred before executing.",
+
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "enum": [
+            "allergy_safety",
+            "large_party",
+            "manager_request",
+            "customer_request",
+            "complaint",
+            "technical_issue"
+          ],
+          "description": "The reason for the transfer. This determines routing priority and which team receives the call. allergy_safety: Mandatory transfer for food safety. large_party: Groups over 8 need events coordinator. manager_request: Caller asked for manager specifically. customer_request: Caller wants to speak to a human (generic). complaint: Caller is expressing dissatisfaction. technical_issue: AI cannot complete the task due to system issues."
+        },
+        "target": {
+          "type": "string",
+          "enum": ["default", "manager", "events", "front_desk"],
+          "default": "default",
+          "description": "Which team should receive the transfer. default: Auto-route based on reason. manager: Restaurant manager (for allergy_safety, complaints). events: Events coordinator (for large_party). front_desk: General host stand (for customer_request, technical_issue)."
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Context for the receiving agent. Include: what the caller needs, any details gathered (party size, date), why AI couldn't help. Example: 'Caller has severe nut allergy, was trying to book for 4 on Friday at 7pm. Needs to discuss kitchen safety protocols.'"
+        },
+        "customer_context": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Summary of the conversation so far. Include: caller's original request, any information collected, current status. This helps the receiving agent continue smoothly without asking the caller to repeat themselves."
+        },
+        "priority": {
+          "type": "string",
+          "enum": ["normal", "high", "urgent"],
+          "default": "normal",
+          "description": "Transfer urgency. normal: Standard queue position. high: Move up in queue (for complaints, returning customers). urgent: Immediate attention (for allergy_safety only). Auto-set to 'urgent' for allergy_safety reason."
+        },
+        "callback_if_unavailable": {
+          "type": "boolean",
+          "default": true,
+          "description": "If no agent is available, should we create a callback request? Set to true (default) so caller isn't left hanging. If false, call will hold in queue indefinitely."
+        }
+      },
+      "required": ["reason"],
+      "additionalProperties": false
+    }
+  },
+
+  "server": {
+    "url": "{{N8N_WEBHOOK_URL}}/webhook/vapi-restaurant",
+    "secret": "{{VAPI_WEBHOOK_SECRET}}",
+    "timeoutSeconds": 5,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Tool-Name": "transfer_call",
+      "X-Tool-Version": "1.0.0"
+    }
+  },
+
+  "messages": [
+    {
+      "type": "request-start",
+      "content": "Let me connect you with someone who can help. One moment please."
+    },
+    {
+      "type": "request-response-delayed",
+      "content": "Still connecting, thank you for your patience...",
+      "timingMilliseconds": 3000
+    },
+    {
+      "type": "request-complete",
+      "content": ""
+    },
+    {
+      "type": "request-failed",
+      "content": "I'm having trouble connecting you right now. Can I take your phone number and have someone call you back within the next 10 minutes?"
+    }
+  ],
+
+  "_response_schema": {
+    "description": "Expected response format from n8n webhook",
+    "type": "object",
+    "properties": {
+      "results": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "toolCallId": {
+              "type": "string"
+            },
+            "result": {
+              "type": "string",
+              "description": "JSON string with transfer result"
+            }
+          }
+        }
+      }
+    },
+    "success_example": {
+      "results": [{
+        "toolCallId": "call_transfer_001",
+        "result": "{\"status\":\"transferring\",\"transfer\":{\"destination\":\"+15551234568\",\"destination_name\":\"Manager\",\"reason\":\"allergy_safety\"},\"message\":\"I'm connecting you with our manager who can discuss our kitchen practices with you.\"}"
+      }]
+    },
+    "callback_example": {
+      "results": [{
+        "toolCallId": "call_transfer_001",
+        "result": "{\"status\":\"callback_created\",\"callback_id\":\"cb_xyz\",\"estimated_callback\":\"within 10 minutes\",\"message\":\"Our team is currently busy, but I've arranged for a manager to call you back within 10 minutes.\"}"
+      }]
+    },
+    "status_values": {
+      "transferring": "Call is being transferred to destination",
+      "callback_created": "No agent available, callback scheduled",
+      "error": "Transfer failed (webhook will create callback automatically)"
+    }
+  },
+
+  "_routing_matrix": {
+    "description": "Automatic routing based on reason when target='default'",
+    "allergy_safety": {
+      "target": "manager",
+      "priority": "urgent",
+      "slack_channel": "#urgent-calls",
+      "phone": "{{MANAGER_PHONE}}"
+    },
+    "large_party": {
+      "target": "events",
+      "priority": "normal",
+      "slack_channel": "#events",
+      "phone": "{{EVENTS_PHONE}}"
+    },
+    "manager_request": {
+      "target": "manager",
+      "priority": "normal",
+      "slack_channel": "#voice-ai-transfers",
+      "phone": "{{MANAGER_PHONE}}"
+    },
+    "customer_request": {
+      "target": "front_desk",
+      "priority": "normal",
+      "slack_channel": "#voice-ai-transfers",
+      "phone": "{{FRONT_DESK_PHONE}}"
+    },
+    "complaint": {
+      "target": "manager",
+      "priority": "high",
+      "slack_channel": "#customer-feedback",
+      "phone": "{{MANAGER_PHONE}}"
+    },
+    "technical_issue": {
+      "target": "front_desk",
+      "priority": "low",
+      "slack_channel": "#voice-ai-errors",
+      "phone": "{{FRONT_DESK_PHONE}}"
+    }
+  },
+
+  "_usage_examples": [
+    {
+      "scenario": "Allergy safety transfer (MANDATORY)",
+      "trigger": "Caller says: 'My son has a severe peanut allergy'",
+      "ai_response": "For your safety, I cannot guarantee allergen-free preparation. Let me transfer you to a manager who can discuss our kitchen practices.",
+      "parameters": {
+        "reason": "allergy_safety",
+        "target": "default",
+        "notes": "Caller's son has severe peanut allergy. Was inquiring about pasta dishes. Needs to discuss cross-contamination protocols.",
+        "customer_context": "Caller wanted to book for 3 on Saturday at 6pm. Asked about menu before mentioning allergy.",
+        "priority": "urgent",
+        "callback_if_unavailable": true
+      }
+    },
+    {
+      "scenario": "Large party transfer",
+      "trigger": "Caller says: 'We need a table for 15'",
+      "ai_response": "Groups over 8 require special arrangements including deposit and set menu options. Let me connect you with our events coordinator.",
+      "parameters": {
+        "reason": "large_party",
+        "target": "events",
+        "notes": "Party of 15 for corporate dinner. Interested in private dining room. Date: next Thursday evening.",
+        "customer_context": "Corporate event, 15 people, Thursday evening, interested in private room and set menu.",
+        "priority": "normal",
+        "callback_if_unavailable": true
+      }
+    },
+    {
+      "scenario": "Customer explicitly requests human",
+      "trigger": "Caller says: 'Can I just talk to a person?'",
+      "ai_response": "Of course, let me connect you with our host. One moment please.",
+      "parameters": {
+        "reason": "customer_request",
+        "target": "front_desk",
+        "notes": "Caller requested to speak with a human. Was asking about reservation modification.",
+        "customer_context": "Has existing reservation, wanted to change time. Preferred to speak with human.",
+        "priority": "normal",
+        "callback_if_unavailable": true
+      }
+    },
+    {
+      "scenario": "Complaint handling",
+      "trigger": "Caller says: 'I had a terrible experience last night'",
+      "ai_response": "I'm sorry to hear that. Let me connect you with a manager who can help address your concerns.",
+      "parameters": {
+        "reason": "complaint",
+        "target": "manager",
+        "notes": "Caller had bad experience last night. Did not provide details yet. Seems frustrated but calm.",
+        "customer_context": "Incoming complaint call. Details not yet provided. Transfer to manager for resolution.",
+        "priority": "high",
+        "callback_if_unavailable": true
+      }
+    },
+    {
+      "scenario": "System error fallback",
+      "trigger": "check_availability or book_appointment returned error",
+      "ai_response": "I'm having trouble with our reservation system. Let me connect you with someone who can help directly.",
+      "parameters": {
+        "reason": "technical_issue",
+        "target": "front_desk",
+        "notes": "System error during booking attempt. Caller wanted table for 4 on Friday at 7pm under name Smith.",
+        "customer_context": "Booking attempt failed. Details: 4 guests, Friday 7pm, name Smith, phone 555-123-4567.",
+        "priority": "normal",
+        "callback_if_unavailable": true
+      }
+    }
+  ],
+
+  "_safety_triggers": {
+    "description": "Keywords that MUST trigger immediate transfer (no exceptions)",
+    "allergy_keywords": [
+      "allergy",
+      "allergies",
+      "allergic",
+      "anaphylactic",
+      "anaphylaxis",
+      "epipen",
+      "epi-pen",
+      "epi pen",
+      "severe allergy",
+      "nut free",
+      "peanut free",
+      "tree nut",
+      "shellfish allergy",
+      "food allergy"
+    ],
+    "action": "Call transfer_call with reason='allergy_safety' IMMEDIATELY upon detecting any keyword",
+    "never_say": [
+      "Our food is safe for allergies",
+      "We can accommodate your allergy",
+      "That dish is allergen-free",
+      "I guarantee there's no cross-contamination"
+    ]
+  },
+
+  "_integration_notes": {
+    "timeout": "5 seconds - transfer initiation is fast, actual transfer happens after",
+    "slack_alert": "All transfers trigger Slack notification to appropriate channel",
+    "callback_creation": "If transfer fails or no agent available, callback record created automatically",
+    "call_recording": "Transfer reason and notes logged with call recording for quality assurance",
+    "metrics": "Transfer rate and reasons tracked in analytics_daily table"
+  }
+}

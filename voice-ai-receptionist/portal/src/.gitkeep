@@ -1,0 +1,13 @@
+# Portal source code directory
+# Will contain:
+# - pages/ - Next.js pages
+# - components/ - React components
+# - lib/ - Utility functions and API clients
+# - styles/ - CSS/Tailwind styles
+
+# Key pages to implement:
+# - Dashboard with KPIs
+# - Reservations list and calendar view
+# - Callback queue management
+# - Call logs and transcripts
+# - Settings and configuration

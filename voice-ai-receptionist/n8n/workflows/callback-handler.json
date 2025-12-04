@@ -1,0 +1,1054 @@
+{
+  "name": "Voice AI - Callback Handler & Escalation",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "c1d2e3f4-0001-4000-8000-000000000001",
+      "name": "Schedule - Every 15 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 400],
+      "notes": "Runs every 15 minutes to check for pending callbacks"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// CHECK IF WITHIN BUSINESS HOURS\n// Only process callbacks during restaurant operating hours\n// ============================================================\n\nconst now = new Date();\nconst hour = now.getHours();\nconst day = now.getDay(); // 0 = Sunday, 6 = Saturday\n\n// Default business hours: 9 AM - 10 PM, 7 days a week\n// These can be overridden per restaurant in the database\nconst businessHoursStart = parseInt($env.BUSINESS_HOURS_START || '9');\nconst businessHoursEnd = parseInt($env.BUSINESS_HOURS_END || '22');\n\nconst isBusinessHours = hour >= businessHoursStart && hour < businessHoursEnd;\n\n// Also check if it's end of day (for daily summary)\nconst isEndOfDay = hour === (businessHoursEnd - 1); // One hour before closing\n\nreturn {\n  json: {\n    isBusinessHours: isBusinessHours,\n    isEndOfDay: isEndOfDay,\n    currentHour: hour,\n    currentDay: day,\n    timestamp: now.toISOString()\n  }\n};"
+      },
+      "id": "c1d2e3f4-0001-4000-8000-000000000002",
+      "name": "Check Business Hours",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "business-hours",
+              "leftValue": "={{ $json.isBusinessHours }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c1d2e3f4-0001-4000-8000-000000000003",
+      "name": "Within Business Hours?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 400]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/callbacks",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "status",
+              "value": "=eq.pending"
+            },
+            {
+              "name": "created_at",
+              "value": "=lt.{{ new Date(Date.now() - 10 * 60 * 1000).toISOString() }}"
+            },
+            {
+              "name": "select",
+              "value": "*,restaurants(name,phone,settings)"
+            },
+            {
+              "name": "order",
+              "value": "priority.desc,created_at.asc"
+            },
+            {
+              "name": "limit",
+              "value": "50"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "c1d2e3f4-0001-4000-8000-000000000004",
+      "name": "Get Pending Callbacks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 480],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SUPABASE_HEADER_AUTH_ID",
+          "name": "Supabase Auth"
+        }
+      },
+      "notes": "Fetch callbacks older than 10 minutes (give initial handler time)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-callbacks",
+              "leftValue": "={{ $json.body?.length > 0 || (Array.isArray($json) && $json.length > 0) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c1d2e3f4-0001-4000-8000-000000000005",
+      "name": "Has Pending Callbacks?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1120, 480]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// PREPARE CALLBACKS FOR PROCESSING\n// Split into items for loop processing\n// ============================================================\n\nconst response = $input.item.json;\nconst callbacks = response.body || response;\n\nif (!Array.isArray(callbacks) || callbacks.length === 0) {\n  return [];\n}\n\n// Add computed fields for each callback\nreturn callbacks.map(callback => {\n  const createdAt = new Date(callback.created_at);\n  const now = new Date();\n  const ageMinutes = Math.floor((now - createdAt) / (1000 * 60));\n  const ageHours = Math.floor(ageMinutes / 60);\n  \n  // Determine escalation status\n  const isUrgent = callback.priority === 'high' || callback.priority === 'urgent';\n  const needsEscalation = (\n    (isUrgent && ageMinutes > 30) || // Urgent callbacks > 30 min\n    (!isUrgent && ageHours >= 2)      // Normal callbacks > 2 hours\n  );\n  const needsOwnerAlert = isUrgent && ageMinutes > 30;\n  const needsPriorityUpgrade = !isUrgent && ageHours >= 2;\n  \n  return {\n    json: {\n      ...callback,\n      ageMinutes: ageMinutes,\n      ageHours: ageHours,\n      isUrgent: isUrgent,\n      needsEscalation: needsEscalation,\n      needsOwnerAlert: needsOwnerAlert,\n      needsPriorityUpgrade: needsPriorityUpgrade,\n      restaurantName: callback.restaurants?.name || 'Unknown Restaurant',\n      restaurantPhone: callback.restaurants?.phone || ''\n    }\n  };\n});"
+      },
+      "id": "c1d2e3f4-0001-4000-8000-000000000006",
+      "name": "Prepare Callbacks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 400]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "c1d2e3f4-0001-4000-8000-000000000007",
+      "name": "Loop Over Callbacks",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1560, 400]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/callbacks",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "=eq.{{ $json.id }}"
+            },
+            {
+              "name": "status",
+              "value": "=eq.pending"
+            },
+            {
+              "name": "select",
+              "value": "id,status"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "c1d2e3f4-0001-4000-8000-000000000008",
+      "name": "Check Still Pending",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1780, 400],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SUPABASE_HEADER_AUTH_ID",
+          "name": "Supabase Auth"
+        }
+      },
+      "notes": "Race condition check - verify callback hasn't been resolved"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "still-pending",
+              "leftValue": "={{ Array.isArray($json) ? $json.length > 0 : ($json.body?.length > 0 || false) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c1d2e3f4-0001-4000-8000-000000000009",
+      "name": "Still Pending?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2000, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "needs-escalation",
+              "leftValue": "={{ $('Loop Over Callbacks').item.json.needsEscalation }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c1d2e3f4-0001-4000-8000-000000000010",
+      "name": "Needs Escalation?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2220, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "needs-owner-alert",
+              "leftValue": "={{ $('Loop Over Callbacks').item.json.needsOwnerAlert }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c1d2e3f4-0001-4000-8000-000000000011",
+      "name": "Needs Owner Alert?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2440, 320]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"channel\": \"{{ $env.SLACK_OWNER_CHANNEL || '#urgent-escalations' }}\",\n  \"username\": \"Voice AI - URGENT\",\n  \"icon_emoji\": \":rotating_light:\",\n  \"text\": \":rotating_light: *URGENT CALLBACK ESCALATION* :rotating_light:\",\n  \"attachments\": [\n    {\n      \"color\": \"danger\",\n      \"blocks\": [\n        {\n          \"type\": \"section\",\n          \"text\": {\n            \"type\": \"mrkdwn\",\n            \"text\": \"*An urgent callback has been pending for over 30 minutes!*\"\n          }\n        },\n        {\n          \"type\": \"section\",\n          \"fields\": [\n            {\n              \"type\": \"mrkdwn\",\n              \"text\": \"*Customer:*\\n{{ $('Loop Over Callbacks').item.json.caller_phone || 'Unknown' }}\"\n            },\n            {\n              \"type\": \"mrkdwn\",\n              \"text\": \"*Age:*\\n{{ $('Loop Over Callbacks').item.json.ageMinutes }} minutes\"\n            },\n            {\n              \"type\": \"mrkdwn\",\n              \"text\": \"*Reason:*\\n{{ $('Loop Over Callbacks').item.json.reason || 'Unknown' }}\"\n            },\n            {\n              \"type\": \"mrkdwn\",\n              \"text\": \"*Restaurant:*\\n{{ $('Loop Over Callbacks').item.json.restaurantName }}\"\n            }\n          ]\n        },\n        {\n          \"type\": \"section\",\n          \"text\": {\n            \"type\": \"mrkdwn\",\n            \"text\": \"*Notes:* {{ $('Loop Over Callbacks').item.json.notes || 'None' }}\"\n          }\n        },\n        {\n          \"type\": \"context\",\n          \"elements\": [\n            {\n              \"type\": \"mrkdwn\",\n              \"text\": \"Callback ID: {{ $('Loop Over Callbacks').item.json.id }} | Created: {{ $('Loop Over Callbacks').item.json.created_at }}\"\n            }\n          ]\n        }\n      ]\n    }\n  ]\n}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "c1d2e3f4-0001-4000-8000-000000000012",
+      "name": "Send Owner Escalation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2660, 240],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/callbacks",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "=eq.{{ $('Loop Over Callbacks').item.json.id }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"escalated_at\": \"{{ new Date().toISOString() }}\",\n  \"escalation_count\": {{ ($('Loop Over Callbacks').item.json.escalation_count || 0) + 1 }},\n  \"notes\": \"{{ ($('Loop Over Callbacks').item.json.notes || '') + ' | Escalated to owner at ' + new Date().toISOString() }}\"\n}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "c1d2e3f4-0001-4000-8000-000000000013",
+      "name": "Update Escalation Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2880, 240],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SUPABASE_HEADER_AUTH_ID",
+          "name": "Supabase Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "needs-upgrade",
+              "leftValue": "={{ $('Loop Over Callbacks').item.json.needsPriorityUpgrade }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c1d2e3f4-0001-4000-8000-000000000014",
+      "name": "Needs Priority Upgrade?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2440, 480]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/callbacks",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "=eq.{{ $('Loop Over Callbacks').item.json.id }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"priority\": \"high\",\n  \"escalated_at\": \"{{ new Date().toISOString() }}\",\n  \"notes\": \"{{ ($('Loop Over Callbacks').item.json.notes || '') + ' | Auto-escalated to high priority after 2 hours at ' + new Date().toISOString() }}\"\n}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "c1d2e3f4-0001-4000-8000-000000000015",
+      "name": "Upgrade to High Priority",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2660, 480],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SUPABASE_HEADER_AUTH_ID",
+          "name": "Supabase Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"channel\": \"#voice-ai-callbacks\",\n  \"username\": \"Voice AI Callbacks\",\n  \"icon_emoji\": \":arrow_up:\",\n  \"text\": \":arrow_up: *Callback Priority Upgraded*\",\n  \"attachments\": [\n    {\n      \"color\": \"warning\",\n      \"fields\": [\n        {\n          \"title\": \"Customer\",\n          \"value\": \"{{ $('Loop Over Callbacks').item.json.caller_phone || 'Unknown' }}\",\n          \"short\": true\n        },\n        {\n          \"title\": \"Age\",\n          \"value\": \"{{ $('Loop Over Callbacks').item.json.ageHours }} hours\",\n          \"short\": true\n        },\n        {\n          \"title\": \"Reason\",\n          \"value\": \"{{ $('Loop Over Callbacks').item.json.reason || 'Unknown' }}\",\n          \"short\": true\n        },\n        {\n          \"title\": \"New Priority\",\n          \"value\": \"HIGH\",\n          \"short\": true\n        }\n      ],\n      \"footer\": \"Auto-escalated after 2+ hours pending | ID: {{ $('Loop Over Callbacks').item.json.id }}\"\n    }\n  ]\n}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "c1d2e3f4-0001-4000-8000-000000000016",
+      "name": "Send Priority Upgrade Notice",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2880, 480],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "end-of-day",
+              "leftValue": "={{ $('Check Business Hours').item.json.isEndOfDay }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c1d2e3f4-0001-4000-8000-000000000017",
+      "name": "Is End of Day?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 320],
+      "notes": "Check if we should generate daily summary"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/callbacks",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "created_at",
+              "value": "=gte.{{ new Date(new Date().setHours(0,0,0,0)).toISOString() }}"
+            },
+            {
+              "name": "select",
+              "value": "id,status,priority,reason,caller_phone,created_at,resolved_at,escalated_at"
+            },
+            {
+              "name": "order",
+              "value": "created_at.asc"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "c1d2e3f4-0001-4000-8000-000000000018",
+      "name": "Get Today's Callbacks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 200],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SUPABASE_HEADER_AUTH_ID",
+          "name": "Supabase Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// GENERATE DAILY CALLBACK SUMMARY\n// Compile statistics and unresolved callbacks for end-of-day report\n// ============================================================\n\nconst callbacks = $input.item.json || [];\nconst today = new Date().toLocaleDateString('en-US', { \n  weekday: 'long', \n  year: 'numeric', \n  month: 'long', \n  day: 'numeric' \n});\n\n// Calculate statistics\nconst total = callbacks.length;\nconst resolved = callbacks.filter(c => c.status === 'resolved').length;\nconst pending = callbacks.filter(c => c.status === 'pending').length;\nconst failed = callbacks.filter(c => c.status === 'failed').length;\nconst escalated = callbacks.filter(c => c.escalated_at).length;\nconst highPriority = callbacks.filter(c => c.priority === 'high' || c.priority === 'urgent').length;\n\n// Calculate average resolution time for resolved callbacks\nconst resolvedCallbacks = callbacks.filter(c => c.status === 'resolved' && c.resolved_at);\nlet avgResolutionMinutes = 0;\nif (resolvedCallbacks.length > 0) {\n  const totalMinutes = resolvedCallbacks.reduce((sum, c) => {\n    const created = new Date(c.created_at);\n    const resolved = new Date(c.resolved_at);\n    return sum + Math.floor((resolved - created) / (1000 * 60));\n  }, 0);\n  avgResolutionMinutes = Math.floor(totalMinutes / resolvedCallbacks.length);\n}\n\n// Get unresolved callbacks for listing\nconst unresolvedList = callbacks\n  .filter(c => c.status === 'pending')\n  .map(c => {\n    const age = Math.floor((new Date() - new Date(c.created_at)) / (1000 * 60));\n    return `• ${c.caller_phone || 'Unknown'} - ${c.reason || 'No reason'} (${age} min old, ${c.priority} priority)`;\n  })\n  .join('\\n');\n\n// Calculate resolution rate\nconst resolutionRate = total > 0 ? Math.round((resolved / total) * 100) : 100;\n\n// Determine summary status emoji\nlet statusEmoji = ':white_check_mark:';\nif (pending > 0) statusEmoji = ':warning:';\nif (pending > 5 || highPriority > 0) statusEmoji = ':rotating_light:';\n\nreturn {\n  json: {\n    date: today,\n    stats: {\n      total: total,\n      resolved: resolved,\n      pending: pending,\n      failed: failed,\n      escalated: escalated,\n      highPriority: highPriority,\n      resolutionRate: resolutionRate,\n      avgResolutionMinutes: avgResolutionMinutes\n    },\n    unresolvedList: unresolvedList || 'None - all callbacks resolved!',\n    statusEmoji: statusEmoji,\n    hasPending: pending > 0\n  }\n};"
+      },
+      "id": "c1d2e3f4-0001-4000-8000-000000000019",
+      "name": "Generate Summary Stats",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"channel\": \"{{ $env.SLACK_MANAGER_CHANNEL || '#voice-ai-daily' }}\",\n  \"username\": \"Voice AI Daily Summary\",\n  \"icon_emoji\": \":clipboard:\",\n  \"text\": \"{{ $json.statusEmoji }} *Daily Callback Summary - {{ $json.date }}*\",\n  \"attachments\": [\n    {\n      \"color\": \"{{ $json.hasPending ? 'warning' : 'good' }}\",\n      \"blocks\": [\n        {\n          \"type\": \"section\",\n          \"fields\": [\n            {\n              \"type\": \"mrkdwn\",\n              \"text\": \"*Total Callbacks:*\\n{{ $json.stats.total }}\"\n            },\n            {\n              \"type\": \"mrkdwn\",\n              \"text\": \"*Resolved:*\\n{{ $json.stats.resolved }} ({{ $json.stats.resolutionRate }}%)\"\n            },\n            {\n              \"type\": \"mrkdwn\",\n              \"text\": \"*Still Pending:*\\n{{ $json.stats.pending }}\"\n            },\n            {\n              \"type\": \"mrkdwn\",\n              \"text\": \"*Failed:*\\n{{ $json.stats.failed }}\"\n            },\n            {\n              \"type\": \"mrkdwn\",\n              \"text\": \"*Escalated:*\\n{{ $json.stats.escalated }}\"\n            },\n            {\n              \"type\": \"mrkdwn\",\n              \"text\": \"*Avg Resolution:*\\n{{ $json.stats.avgResolutionMinutes }} min\"\n            }\n          ]\n        },\n        {\n          \"type\": \"divider\"\n        },\n        {\n          \"type\": \"section\",\n          \"text\": {\n            \"type\": \"mrkdwn\",\n            \"text\": \"*Unresolved Callbacks:*\\n{{ $json.unresolvedList }}\"\n          }\n        }\n      ]\n    }\n  ]\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "c1d2e3f4-0001-4000-8000-000000000020",
+      "name": "Send Daily Summary to Slack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 200],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-pending",
+              "leftValue": "={{ $json.hasPending }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c1d2e3f4-0001-4000-8000-000000000021",
+      "name": "Has Pending for Email?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1780, 200]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.SYSTEM_EMAIL || 'noreply@voiceai.restaurant' }}",
+        "toEmail": "={{ $env.MANAGER_EMAIL }}",
+        "subject": "=Voice AI Daily Summary - {{ $('Generate Summary Stats').item.json.stats.pending }} Unresolved Callbacks",
+        "emailType": "html",
+        "html": "=<html>\n<body style=\"font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;\">\n  <h2 style=\"color: #333;\">Daily Callback Summary</h2>\n  <p style=\"color: #666;\">{{ $('Generate Summary Stats').item.json.date }}</p>\n  \n  <table style=\"width: 100%; border-collapse: collapse; margin: 20px 0;\">\n    <tr style=\"background: #f5f5f5;\">\n      <td style=\"padding: 10px; border: 1px solid #ddd;\"><strong>Total Callbacks</strong></td>\n      <td style=\"padding: 10px; border: 1px solid #ddd;\">{{ $('Generate Summary Stats').item.json.stats.total }}</td>\n    </tr>\n    <tr>\n      <td style=\"padding: 10px; border: 1px solid #ddd;\"><strong>Resolved</strong></td>\n      <td style=\"padding: 10px; border: 1px solid #ddd;\">{{ $('Generate Summary Stats').item.json.stats.resolved }} ({{ $('Generate Summary Stats').item.json.stats.resolutionRate }}%)</td>\n    </tr>\n    <tr style=\"background: {{ $('Generate Summary Stats').item.json.stats.pending > 0 ? '#fff3cd' : '#d4edda' }};\">\n      <td style=\"padding: 10px; border: 1px solid #ddd;\"><strong>Still Pending</strong></td>\n      <td style=\"padding: 10px; border: 1px solid #ddd;\">{{ $('Generate Summary Stats').item.json.stats.pending }}</td>\n    </tr>\n    <tr>\n      <td style=\"padding: 10px; border: 1px solid #ddd;\"><strong>Failed</strong></td>\n      <td style=\"padding: 10px; border: 1px solid #ddd;\">{{ $('Generate Summary Stats').item.json.stats.failed }}</td>\n    </tr>\n    <tr>\n      <td style=\"padding: 10px; border: 1px solid #ddd;\"><strong>Escalated</strong></td>\n      <td style=\"padding: 10px; border: 1px solid #ddd;\">{{ $('Generate Summary Stats').item.json.stats.escalated }}</td>\n    </tr>\n    <tr>\n      <td style=\"padding: 10px; border: 1px solid #ddd;\"><strong>Avg Resolution Time</strong></td>\n      <td style=\"padding: 10px; border: 1px solid #ddd;\">{{ $('Generate Summary Stats').item.json.stats.avgResolutionMinutes }} minutes</td>\n    </tr>\n  </table>\n  \n  <h3 style=\"color: #dc3545;\">Unresolved Callbacks Requiring Action:</h3>\n  <pre style=\"background: #f8f9fa; padding: 15px; border-radius: 5px;\">{{ $('Generate Summary Stats').item.json.unresolvedList }}</pre>\n  \n  <p style=\"color: #666; font-size: 12px; margin-top: 30px;\">\n    This is an automated message from the Voice AI Receptionist system.\n  </p>\n</body>\n</html>",
+        "options": {}
+      },
+      "id": "c1d2e3f4-0001-4000-8000-000000000022",
+      "name": "Send Email to Manager",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [2000, 120],
+      "credentials": {
+        "smtp": {
+          "id": "SMTP_CREDENTIAL_ID",
+          "name": "SMTP"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Send email only if there are pending callbacks"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// MERGE LOOP RESULTS\n// Collect results from all callback processing\n// ============================================================\n\n// This node collects all processed callbacks\n// It's a passthrough to allow the loop to complete\n\nreturn {\n  json: {\n    status: 'processed',\n    timestamp: new Date().toISOString()\n  }\n};"
+      },
+      "id": "c1d2e3f4-0001-4000-8000-000000000023",
+      "name": "Merge Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3100, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// NO-OP: Outside Business Hours\n// Log that we skipped processing\n// ============================================================\n\nreturn {\n  json: {\n    status: 'skipped',\n    reason: 'outside_business_hours',\n    timestamp: new Date().toISOString()\n  }\n};"
+      },
+      "id": "c1d2e3f4-0001-4000-8000-000000000024",
+      "name": "Skip - Outside Hours",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 600],
+      "notes": "No processing outside business hours"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// NO-OP: No Pending Callbacks\n// ============================================================\n\nreturn {\n  json: {\n    status: 'no_callbacks',\n    timestamp: new Date().toISOString()\n  }\n};"
+      },
+      "id": "c1d2e3f4-0001-4000-8000-000000000025",
+      "name": "No Callbacks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 600]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// HANDLE DATABASE ERROR\n// Log error for monitoring\n// ============================================================\n\nconst error = $input.item.json;\n\nconsole.error('Callback handler database error:', error);\n\nreturn {\n  json: {\n    status: 'error',\n    error: 'database_error',\n    details: error,\n    timestamp: new Date().toISOString()\n  }\n};"
+      },
+      "id": "c1d2e3f4-0001-4000-8000-000000000026",
+      "name": "Handle DB Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 680]
+    }
+  ],
+  "connections": {
+    "Schedule - Every 15 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Check Business Hours",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Business Hours": {
+      "main": [
+        [
+          {
+            "node": "Within Business Hours?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Within Business Hours?": {
+      "main": [
+        [
+          {
+            "node": "Skip - Outside Hours",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get Pending Callbacks",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Is End of Day?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Pending Callbacks": {
+      "main": [
+        [
+          {
+            "node": "Has Pending Callbacks?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle DB Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Pending Callbacks?": {
+      "main": [
+        [
+          {
+            "node": "No Callbacks",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Callbacks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Callbacks": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Callbacks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Callbacks": {
+      "main": [
+        [
+          {
+            "node": "Check Still Pending",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Still Pending": {
+      "main": [
+        [
+          {
+            "node": "Still Pending?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Still Pending?": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Callbacks",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Needs Escalation?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs Escalation?": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Callbacks",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Needs Owner Alert?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Needs Priority Upgrade?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs Owner Alert?": {
+      "main": [
+        [
+          {
+            "node": "Send Owner Escalation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Callbacks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Owner Escalation": {
+      "main": [
+        [
+          {
+            "node": "Update Escalation Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Escalation Status": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Callbacks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs Priority Upgrade?": {
+      "main": [
+        [
+          {
+            "node": "Upgrade to High Priority",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Callbacks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upgrade to High Priority": {
+      "main": [
+        [
+          {
+            "node": "Send Priority Upgrade Notice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Priority Upgrade Notice": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Callbacks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is End of Day?": {
+      "main": [
+        [
+          {
+            "node": "Get Today's Callbacks",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Get Today's Callbacks": {
+      "main": [
+        [
+          {
+            "node": "Generate Summary Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Summary Stats": {
+      "main": [
+        [
+          {
+            "node": "Send Daily Summary to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Daily Summary to Slack": {
+      "main": [
+        [
+          {
+            "node": "Has Pending for Email?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Pending for Email?": {
+      "main": [
+        [
+          {
+            "node": "Send Email to Manager",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionTimeout": 300,
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "timezone": "America/New_York"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "id": "tag-voice-ai",
+      "name": "voice-ai"
+    },
+    {
+      "id": "tag-callbacks",
+      "name": "callbacks"
+    },
+    {
+      "id": "tag-scheduled",
+      "name": "scheduled"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2024-01-15T00:00:00.000Z",
+  "versionId": "1.0.0",
+  "meta": {
+    "templateId": "callback-handler-escalation",
+    "instanceId": "voice-ai-receptionist",
+    "notes": "CALLBACK HANDLER & ESCALATION WORKFLOW\n\nThis workflow runs every 15 minutes during business hours to:\n1. Process pending callbacks older than 10 minutes\n2. Escalate urgent callbacks to owner after 30 minutes\n3. Auto-upgrade normal priority to high after 2 hours\n4. Generate daily summary at end of business day\n\nESCALATION RULES:\n- Urgent callbacks > 30 min: Alert owner in #urgent-escalations\n- Normal callbacks > 2 hours: Upgrade to high priority, notify #voice-ai-callbacks\n\nIDEMPOTENCY:\n- Each callback is checked for 'still pending' before processing\n- Prevents duplicate escalations if resolved between fetch and process\n- Escalation count tracked to prevent notification spam\n\nDAILY SUMMARY (sent 1 hour before closing):\n- Total callbacks, resolved, pending, failed counts\n- Resolution rate percentage\n- Average resolution time\n- List of unresolved callbacks\n- Email sent to manager only if pending callbacks exist\n\nENVIRONMENT VARIABLES REQUIRED:\n- BUSINESS_HOURS_START (default: 9)\n- BUSINESS_HOURS_END (default: 22)\n- SLACK_OWNER_CHANNEL (default: #urgent-escalations)\n- SLACK_MANAGER_CHANNEL (default: #voice-ai-daily)\n- MANAGER_EMAIL"
+  }
+}

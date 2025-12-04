@@ -1,0 +1,22 @@
+{
+  "name": "voice-ai-receptionist-integration-tests",
+  "version": "1.0.0",
+  "description": "Integration tests for Voice AI Receptionist system",
+  "private": true,
+  "scripts": {
+    "test": "ts-node run-all.ts",
+    "test:availability": "ts-node run-all.ts availability",
+    "test:booking": "ts-node run-all.ts booking",
+    "test:error": "ts-node run-all.ts error",
+    "test:transfer": "ts-node run-all.ts transfer",
+    "test:junit": "ts-node run-all.ts all --junit"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.0"
+  }
+}
