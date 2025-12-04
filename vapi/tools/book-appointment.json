@@ -1,0 +1,213 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "_meta": {
+    "name": "book_appointment",
+    "version": "1.0.0",
+    "description": "Vapi tool definition for creating restaurant reservations",
+    "reference": "Section 2.2.2 of Restaurant AI Automation Master Guide"
+  },
+
+  "type": "function",
+  "async": false,
+
+  "function": {
+    "name": "book_appointment",
+    "description": "Create a restaurant reservation and optionally send SMS confirmation. PREREQUISITES before calling: 1) check_availability returned 'available' for this exact slot, 2) You have collected customer_name, customer_phone, datetime, and party_size, 3) You have asked about SMS consent ('Should I text you a confirmation?'). DO NOT call this tool if any prerequisite is missing.",
+
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "customer_name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100,
+          "description": "Full name for the reservation. Accept whatever format the caller provides (e.g., 'John', 'John Smith', 'Dr. Smith'). Do not ask for spelling unless unclear."
+        },
+        "customer_phone": {
+          "type": "string",
+          "pattern": "^\\+?1?[\\s.-]?\\(?[0-9]{3}\\)?[\\s.-]?[0-9]{3}[\\s.-]?[0-9]{4}$",
+          "description": "Customer's phone number. Accept common US formats: '555-123-4567', '(555) 123-4567', '5551234567', '+1 555 123 4567'. The webhook will normalize to E.164 format (+15551234567)."
+        },
+        "datetime": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The CONFIRMED reservation date and time in ISO 8601 format. This must match a slot that check_availability confirmed as available. Example: '2024-03-15T19:00:00'."
+        },
+        "party_size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20,
+          "description": "Number of guests. Must match what was checked in check_availability. For parties over 8, you should have already transferred to events team."
+        },
+        "seating_type": {
+          "type": "string",
+          "enum": ["any", "indoor", "outdoor", "bar", "patio", "private"],
+          "default": "any",
+          "description": "The confirmed seating area. Should match what was available in check_availability response."
+        },
+        "special_requests": {
+          "type": "string",
+          "maxLength": 500,
+          "default": "",
+          "description": "Any special requests mentioned by the caller. Examples: 'birthday celebration', 'need high chair', 'wheelchair accessible', 'anniversary dinner', 'quiet table', 'near window'. Leave empty if no requests mentioned. DO NOT include allergy information here - allergies should trigger a transfer."
+        },
+        "sms_consent": {
+          "type": "boolean",
+          "default": true,
+          "description": "TCPA COMPLIANCE REQUIRED: Set to true ONLY if caller explicitly agreed to receive SMS. You MUST ask 'Should I text you a confirmation at that number?' and receive affirmative response. If caller says 'no' or declines, set to false. If uncertain, default to false."
+        }
+      },
+      "required": ["customer_name", "customer_phone", "datetime", "party_size"],
+      "additionalProperties": false
+    }
+  },
+
+  "server": {
+    "url": "{{N8N_WEBHOOK_URL}}/webhook/vapi-restaurant",
+    "secret": "{{VAPI_WEBHOOK_SECRET}}",
+    "timeoutSeconds": 8,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Tool-Name": "book_appointment",
+      "X-Tool-Version": "1.0.0"
+    }
+  },
+
+  "messages": [
+    {
+      "type": "request-start",
+      "content": "Perfect, let me book that for you now..."
+    },
+    {
+      "type": "request-response-delayed",
+      "content": "Just finishing up the reservation...",
+      "timingMilliseconds": 4000
+    },
+    {
+      "type": "request-complete",
+      "content": ""
+    },
+    {
+      "type": "request-failed",
+      "content": "I apologize, but I wasn't able to complete that booking. It looks like that slot may have just been taken. Let me check for the next available time."
+    }
+  ],
+
+  "_response_schema": {
+    "description": "Expected response format from n8n webhook",
+    "type": "object",
+    "properties": {
+      "results": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "toolCallId": {
+              "type": "string"
+            },
+            "result": {
+              "type": "string",
+              "description": "JSON string with booking result"
+            }
+          }
+        }
+      }
+    },
+    "success_example": {
+      "results": [{
+        "toolCallId": "call_xyz789",
+        "result": "{\"status\":\"booked\",\"reservation\":{\"id\":\"res_123\",\"confirmation_code\":\"TK4X7M\",\"datetime\":\"2024-03-15T19:00:00\",\"party_size\":4,\"customer_name\":\"John Smith\"},\"sms_sent\":true,\"message\":\"Perfect! Table for 4, Friday at 7 PM under Smith. Confirmation code TK4X7M. I've sent a text to your phone.\"}"
+      }]
+    },
+    "conflict_example": {
+      "results": [{
+        "toolCallId": "call_xyz789",
+        "result": "{\"status\":\"slot_taken\",\"error_code\":\"SLOT_CONFLICT\",\"should_requery\":true,\"message\":\"That slot was just taken. Let me check what else is available.\"}"
+      }]
+    },
+    "status_values": {
+      "booked": "Reservation successfully created",
+      "slot_taken": "Race condition - slot taken between check and book (re-query availability)",
+      "validation_error": "Invalid input data (missing fields, bad phone format)",
+      "error": "System error (offer callback)"
+    }
+  },
+
+  "_phone_validation": {
+    "description": "Phone number formats accepted and normalization",
+    "accepted_formats": [
+      "5551234567",
+      "555-123-4567",
+      "(555) 123-4567",
+      "555.123.4567",
+      "+1 555 123 4567",
+      "+15551234567",
+      "1-555-123-4567"
+    ],
+    "normalization": "All formats normalized to E.164: +15551234567",
+    "validation_rules": [
+      "Must be 10 digits (US) or 11 digits starting with 1",
+      "International numbers: must start with + and country code",
+      "Webhook performs final validation and rejects invalid numbers"
+    ]
+  },
+
+  "_usage_examples": [
+    {
+      "scenario": "Standard booking with SMS consent",
+      "parameters": {
+        "customer_name": "John Smith",
+        "customer_phone": "555-123-4567",
+        "datetime": "2024-03-15T19:00:00",
+        "party_size": 4,
+        "seating_type": "indoor",
+        "special_requests": "",
+        "sms_consent": true
+      }
+    },
+    {
+      "scenario": "Birthday celebration, no SMS",
+      "parameters": {
+        "customer_name": "Sarah Johnson",
+        "customer_phone": "(212) 555-0199",
+        "datetime": "2024-03-20T18:30:00",
+        "party_size": 6,
+        "seating_type": "private",
+        "special_requests": "birthday celebration for wife, can you bring cake with candles at 8pm?",
+        "sms_consent": false
+      }
+    },
+    {
+      "scenario": "Outdoor seating with high chair",
+      "parameters": {
+        "customer_name": "Mike",
+        "customer_phone": "5558675309",
+        "datetime": "2024-03-16T12:00:00",
+        "party_size": 3,
+        "seating_type": "patio",
+        "special_requests": "need high chair for toddler",
+        "sms_consent": true
+      }
+    }
+  ],
+
+  "_tcpa_compliance": {
+    "requirement": "Telephone Consumer Protection Act requires prior express consent for SMS",
+    "implementation": [
+      "ALWAYS ask: 'Should I text you a confirmation at that number?'",
+      "WAIT for affirmative response before setting sms_consent=true",
+      "Acceptable affirmative: 'yes', 'sure', 'please', 'that would be great'",
+      "If declined or unclear: set sms_consent=false",
+      "Verbal consent is recorded in call recording for audit purposes"
+    ],
+    "sms_content": "Confirmation SMS includes opt-out instructions: 'Reply CANCEL to cancel'"
+  },
+
+  "_integration_notes": {
+    "timeout": "8 seconds - longer than check_availability due to database write + SMS send",
+    "idempotency": "Duplicate bookings prevented by unique constraint on (datetime, party_size, customer_phone)",
+    "race_condition": "If slot_taken returned, immediately call check_availability for alternatives",
+    "sms_failure": "If SMS fails, booking still succeeds - callback created for manual confirmation",
+    "special_requests_filter": "Webhook filters out allergy mentions and flags for review"
+  }
+}

@@ -1,0 +1,1211 @@
+{
+  "name": "Voice AI - Main Webhook Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "vapi-restaurant",
+        "responseMode": "lastNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000001",
+      "name": "Vapi Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 560],
+      "webhookId": "vapi-restaurant-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// VALIDATE REQUEST NODE\n// Verify X-Vapi-Secret header and parse function call\n// ============================================================\n\nconst headers = $input.item.json.headers;\nconst body = $input.item.json.body;\n\n// Get secret from environment variable\nconst expectedSecret = $env.VAPI_WEBHOOK_SECRET;\n\n// Validate X-Vapi-Secret header\nconst providedSecret = headers['x-vapi-secret'] || headers['X-Vapi-Secret'];\n\nif (!providedSecret || providedSecret !== expectedSecret) {\n  // Return 401 Unauthorized response\n  return {\n    json: {\n      error: true,\n      statusCode: 401,\n      message: 'Unauthorized: Invalid or missing X-Vapi-Secret header'\n    }\n  };\n}\n\n// Validate request body structure\nif (!body || !body.message) {\n  return {\n    json: {\n      error: true,\n      statusCode: 400,\n      message: 'Bad Request: Missing message in request body'\n    }\n  };\n}\n\n// Check if this is a function-call message type\nif (body.message.type !== 'function-call') {\n  return {\n    json: {\n      error: true,\n      statusCode: 400,\n      message: 'Bad Request: Expected function-call message type'\n    }\n  };\n}\n\n// Extract function call details\nconst functionCall = body.message.functionCall;\n\nif (!functionCall || !functionCall.name || !functionCall.id) {\n  return {\n    json: {\n      error: true,\n      statusCode: 400,\n      message: 'Bad Request: Invalid function call structure'\n    }\n  };\n}\n\n// Get restaurant ID from call metadata or environment\nconst restaurantId = body.call?.assistantOverrides?.metadata?.restaurantId \n  || body.call?.metadata?.restaurantId\n  || $env.DEFAULT_RESTAURANT_ID;\n\nif (!restaurantId) {\n  return {\n    json: {\n      error: true,\n      statusCode: 400,\n      message: 'Bad Request: Missing restaurant ID'\n    }\n  };\n}\n\n// Return validated and parsed data\nreturn {\n  json: {\n    error: false,\n    validated: true,\n    callId: body.call?.id || null,\n    callerId: body.call?.customer?.number || null,\n    restaurantId: restaurantId,\n    functionName: functionCall.name,\n    functionCallId: functionCall.id,\n    parameters: functionCall.parameters || {},\n    timestamp: new Date().toISOString()\n  }\n};"
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000002",
+      "name": "Validate Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 560]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "auth-check",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000003",
+      "name": "Auth Failed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 560]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Return error response for failed authentication\nconst error = $input.item.json;\n\nreturn {\n  json: {\n    statusCode: error.statusCode || 401,\n    body: {\n      error: true,\n      message: error.message\n    }\n  }\n};"
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000004",
+      "name": "Auth Error Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 420]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.functionName }}",
+                    "rightValue": "check_availability",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "check_availability"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.functionName }}",
+                    "rightValue": "book_appointment",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "book_appointment"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.functionName }}",
+                    "rightValue": "transfer_call",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "transfer_call"
+            }
+          ],
+          "fallbackOutput": {
+            "type": "extra",
+            "output": "extra"
+          }
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000005",
+      "name": "Route by Function",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [900, 660]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// PARSE CHECK_AVAILABILITY PARAMETERS\n// Validate and prepare data for Supabase function call\n// ============================================================\n\nconst input = $input.item.json;\nconst params = input.parameters;\n\n// Validate required parameters\nif (!params.search_datetime) {\n  return {\n    json: {\n      error: true,\n      errorCode: 'MISSING_DATETIME',\n      message: 'I need to know what date and time you\\'re looking for.',\n      toolCallId: input.functionCallId\n    }\n  };\n}\n\nif (!params.party_size || params.party_size < 1) {\n  return {\n    json: {\n      error: true,\n      errorCode: 'MISSING_PARTY_SIZE',\n      message: 'How many people will be dining?',\n      toolCallId: input.functionCallId\n    }\n  };\n}\n\n// Parse and validate datetime\nconst searchDate = new Date(params.search_datetime);\nif (isNaN(searchDate.getTime())) {\n  return {\n    json: {\n      error: true,\n      errorCode: 'INVALID_DATETIME',\n      message: 'I didn\\'t quite catch the date. Could you repeat when you\\'d like to come in?',\n      toolCallId: input.functionCallId\n    }\n  };\n}\n\n// Validate party size range\nconst partySize = parseInt(params.party_size);\nif (partySize > 20) {\n  return {\n    json: {\n      error: true,\n      errorCode: 'PARTY_TOO_LARGE',\n      message: 'For parties larger than 20, I\\'ll need to connect you with our events coordinator.',\n      requiresTransfer: true,\n      transferReason: 'large_party',\n      toolCallId: input.functionCallId\n    }\n  };\n}\n\n// Validate date is in the future (with 5 min buffer)\nconst now = new Date();\nnow.setMinutes(now.getMinutes() - 5);\nif (searchDate < now) {\n  return {\n    json: {\n      error: true,\n      errorCode: 'DATE_IN_PAST',\n      message: 'That time has already passed. Would you like to check availability for a future date?',\n      toolCallId: input.functionCallId\n    }\n  };\n}\n\n// Validate not too far in future (90 days)\nconst maxDate = new Date();\nmaxDate.setDate(maxDate.getDate() + 90);\nif (searchDate > maxDate) {\n  return {\n    json: {\n      error: true,\n      errorCode: 'DATE_TOO_FAR',\n      message: 'We can only book up to 90 days in advance. Would you like to check a date within that range?',\n      toolCallId: input.functionCallId\n    }\n  };\n}\n\n// Normalize seating preference\nconst seatingPref = (params.seating_preference || 'any').toLowerCase();\nconst validSeatingTypes = ['any', 'indoor', 'outdoor', 'bar', 'patio', 'private'];\nconst normalizedSeating = validSeatingTypes.includes(seatingPref) ? seatingPref : 'any';\n\nreturn {\n  json: {\n    error: false,\n    toolCallId: input.functionCallId,\n    restaurantId: input.restaurantId,\n    callId: input.callId,\n    searchDatetime: searchDate.toISOString(),\n    partySize: partySize,\n    seatingPreference: normalizedSeating,\n    originalRequest: {\n      datetime: params.search_datetime,\n      party_size: params.party_size,\n      seating: params.seating_preference\n    }\n  }\n};"
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000006",
+      "name": "Parse Availability Params",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1140, 380]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "param-error",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000007",
+      "name": "Availability Params Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1360, 380]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/rpc/check_availability",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"p_restaurant_id\": \"{{ $json.restaurantId }}\",\n  \"p_datetime\": \"{{ $json.searchDatetime }}\",\n  \"p_party_size\": {{ $json.partySize }},\n  \"p_seating_pref\": \"{{ $json.seatingPreference }}\"\n}",
+        "options": {
+          "timeout": 5000,
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000008",
+      "name": "Call check_availability",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1580, 460],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 500,
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SUPABASE_HEADER_AUTH_ID",
+          "name": "Supabase Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// FORMAT AVAILABILITY RESPONSE FOR VAPI\n// Convert Supabase response to Vapi tool result format\n// ============================================================\n\nconst input = $('Parse Availability Params').item.json;\nconst httpResponse = $input.item.json;\nconst toolCallId = input.toolCallId;\n\n// Handle HTTP errors\nif (httpResponse.statusCode && httpResponse.statusCode >= 400) {\n  return {\n    json: {\n      results: [{\n        toolCallId: toolCallId,\n        result: JSON.stringify({\n          status: 'error',\n          error_code: 'SYSTEM_ERROR',\n          message: 'I\\'m having trouble checking availability right now. Can I take your number for a callback?'\n        })\n      }]\n    }\n  };\n}\n\n// Parse Supabase response\nconst availability = httpResponse.body || httpResponse;\n\n// Build response based on availability status\nlet message;\nlet responseData;\n\nif (availability.status === 'available') {\n  const timeStr = new Date(availability.exact_slot.datetime).toLocaleTimeString('en-US', { \n    hour: 'numeric', \n    minute: '2-digit',\n    hour12: true \n  });\n  message = `Great news! I have ${timeStr} available for a party of ${input.partySize}.`;\n  \n  if (input.seatingPreference !== 'any') {\n    message += ` That's ${input.seatingPreference} seating as requested.`;\n  }\n  message += ' Shall I book that for you?';\n  \n  responseData = {\n    status: 'available',\n    exact_slot: availability.exact_slot,\n    message: message\n  };\n} \nelse if (availability.status === 'alternatives' || availability.status === 'partial_match') {\n  const alternatives = availability.alternative_slots || [];\n  \n  if (alternatives.length > 0) {\n    const timeOptions = alternatives.slice(0, 3).map(slot => {\n      return new Date(slot.datetime).toLocaleTimeString('en-US', { \n        hour: 'numeric', \n        minute: '2-digit',\n        hour12: true \n      });\n    });\n    \n    if (timeOptions.length === 1) {\n      message = `That exact time isn't available, but I do have ${timeOptions[0]}. Would that work?`;\n    } else if (timeOptions.length === 2) {\n      message = `That time isn't available, but I have ${timeOptions[0]} or ${timeOptions[1]}. Would either of those work?`;\n    } else {\n      message = `That time isn't available, but I have ${timeOptions[0]}, ${timeOptions[1]}, or ${timeOptions[2]}. Would any of those work?`;\n    }\n  } else {\n    message = 'That exact time isn\\'t available. Would you like to try a different time?';\n  }\n  \n  responseData = {\n    status: 'alternatives',\n    requested_slot: {\n      datetime: input.searchDatetime,\n      available: false\n    },\n    alternative_slots: alternatives,\n    message: message\n  };\n}\nelse if (availability.status === 'closed') {\n  message = availability.message || 'I\\'m sorry, we\\'re closed at that time. Would you like to try a different day?';\n  responseData = {\n    status: 'unavailable',\n    reason: 'closed',\n    message: message\n  };\n}\nelse if (availability.status === 'blocked') {\n  message = availability.message || 'I\\'m sorry, we\\'re not taking reservations for that date. Would you like to try a different day?';\n  responseData = {\n    status: 'unavailable',\n    reason: 'blocked',\n    message: message\n  };\n}\nelse {\n  // No availability\n  message = 'I\\'m sorry, I don\\'t have any tables available around that time. Would you like to try a different date or time?';\n  responseData = {\n    status: 'unavailable',\n    reason: 'fully_booked',\n    message: message\n  };\n}\n\nreturn {\n  json: {\n    results: [{\n      toolCallId: toolCallId,\n      result: JSON.stringify(responseData)\n    }]\n  }\n};"
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000009",
+      "name": "Format Availability Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1800, 460]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// PARSE BOOK_APPOINTMENT PARAMETERS\n// Validate and prepare data for Supabase booking function\n// ============================================================\n\nconst input = $input.item.json;\nconst params = input.parameters;\n\n// Validate required parameters\nif (!params.customer_name) {\n  return {\n    json: {\n      error: true,\n      errorCode: 'MISSING_NAME',\n      message: 'I\\'ll need your name for the reservation. What name should I put it under?',\n      toolCallId: input.functionCallId\n    }\n  };\n}\n\nif (!params.customer_phone) {\n  return {\n    json: {\n      error: true,\n      errorCode: 'MISSING_PHONE',\n      message: 'I\\'ll need a phone number for the reservation. What\\'s the best number to reach you?',\n      toolCallId: input.functionCallId\n    }\n  };\n}\n\nif (!params.datetime) {\n  return {\n    json: {\n      error: true,\n      errorCode: 'MISSING_DATETIME',\n      message: 'What date and time would you like to book?',\n      toolCallId: input.functionCallId\n    }\n  };\n}\n\nif (!params.party_size || params.party_size < 1) {\n  return {\n    json: {\n      error: true,\n      errorCode: 'MISSING_PARTY_SIZE',\n      message: 'How many people will be dining?',\n      toolCallId: input.functionCallId\n    }\n  };\n}\n\n// Validate and normalize phone number\nlet phone = params.customer_phone.toString().replace(/\\D/g, '');\n\n// Handle US numbers\nif (phone.length === 10) {\n  phone = '+1' + phone;\n} else if (phone.length === 11 && phone.startsWith('1')) {\n  phone = '+' + phone;\n} else if (!phone.startsWith('+')) {\n  phone = '+' + phone;\n}\n\n// Basic E.164 validation\nconst phoneRegex = /^\\+[1-9]\\d{6,14}$/;\nif (!phoneRegex.test(phone)) {\n  return {\n    json: {\n      error: true,\n      errorCode: 'INVALID_PHONE',\n      message: 'I didn\\'t quite get that phone number. Could you repeat it with the area code?',\n      toolCallId: input.functionCallId\n    }\n  };\n}\n\n// Parse datetime\nconst bookingDate = new Date(params.datetime);\nif (isNaN(bookingDate.getTime())) {\n  return {\n    json: {\n      error: true,\n      errorCode: 'INVALID_DATETIME',\n      message: 'I didn\\'t quite catch the date. Could you repeat when you\\'d like to come in?',\n      toolCallId: input.functionCallId\n    }\n  };\n}\n\n// Validate party size\nconst partySize = parseInt(params.party_size);\nif (partySize > 20) {\n  return {\n    json: {\n      error: true,\n      errorCode: 'PARTY_TOO_LARGE',\n      message: 'For parties larger than 20, I\\'ll need to connect you with our events coordinator.',\n      requiresTransfer: true,\n      transferReason: 'large_party',\n      toolCallId: input.functionCallId\n    }\n  };\n}\n\n// Check for allergy mentions in special requests (safety trigger)\nconst specialRequests = params.special_requests || '';\nconst allergyKeywords = ['allergy', 'allergic', 'anaphylactic', 'epipen', 'severe allergy', 'nut', 'peanut', 'shellfish', 'gluten', 'celiac', 'dairy free'];\nconst hasAllergyMention = allergyKeywords.some(keyword => \n  specialRequests.toLowerCase().includes(keyword)\n);\n\nif (hasAllergyMention) {\n  return {\n    json: {\n      error: false,\n      safetyTrigger: true,\n      safetyType: 'allergy',\n      message: 'I want to make sure we can accommodate your dietary needs safely. Let me connect you with a manager who can discuss our allergy protocols.',\n      toolCallId: input.functionCallId,\n      restaurantId: input.restaurantId,\n      callId: input.callId,\n      customerData: {\n        name: params.customer_name.trim(),\n        phone: phone,\n        sms_consent: params.sms_consent !== false\n      },\n      bookingData: {\n        datetime: bookingDate.toISOString(),\n        party_size: partySize,\n        seating_type: params.seating_type || 'any',\n        special_requests: specialRequests\n      }\n    }\n  };\n}\n\n// Determine SMS consent (default true unless explicitly false)\nconst smsConsent = params.sms_consent !== false;\n\nreturn {\n  json: {\n    error: false,\n    safetyTrigger: false,\n    toolCallId: input.functionCallId,\n    restaurantId: input.restaurantId,\n    callId: input.callId,\n    customerData: {\n      name: params.customer_name.trim(),\n      phone: phone,\n      sms_consent: smsConsent\n    },\n    bookingData: {\n      datetime: bookingDate.toISOString(),\n      party_size: partySize,\n      seating_type: params.seating_type || 'any',\n      special_requests: specialRequests.trim()\n    }\n  }\n};"
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000010",
+      "name": "Parse Booking Params",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1140, 620]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "booking-param-error",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000011",
+      "name": "Booking Params Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1360, 620]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "safety-trigger",
+              "leftValue": "={{ $json.safetyTrigger }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000012",
+      "name": "Safety Trigger?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1580, 700]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/rpc/create_booking",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"p_restaurant_id\": \"{{ $json.restaurantId }}\",\n  \"p_call_id\": {{ $json.callId ? '\"' + $json.callId + '\"' : 'null' }},\n  \"p_customer_data\": {{ JSON.stringify($json.customerData) }},\n  \"p_booking_data\": {{ JSON.stringify($json.bookingData) }}\n}",
+        "options": {
+          "timeout": 5000,
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000013",
+      "name": "Call create_booking",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1800, 780],
+      "retryOnFail": false,
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SUPABASE_HEADER_AUTH_ID",
+          "name": "Supabase Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "booking-success",
+              "leftValue": "={{ $json.body?.status || $json.status }}",
+              "rightValue": "booked",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000014",
+      "name": "Booking Successful?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2020, 780]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_WEBHOOK_URL }}/webhook/booking-confirmation",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Internal-Secret",
+              "value": "={{ $env.N8N_INTERNAL_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"reservation_id\": \"{{ $json.body?.reservation?.id || $json.reservation?.id }}\",\n  \"confirmation_code\": \"{{ $json.body?.reservation?.confirmation_code || $json.reservation?.confirmation_code }}\",\n  \"customer_phone\": \"{{ $('Parse Booking Params').item.json.customerData.phone }}\",\n  \"customer_name\": \"{{ $('Parse Booking Params').item.json.customerData.name }}\",\n  \"party_size\": {{ $('Parse Booking Params').item.json.bookingData.party_size }},\n  \"datetime\": \"{{ $('Parse Booking Params').item.json.bookingData.datetime }}\",\n  \"sms_consent\": {{ $('Parse Booking Params').item.json.customerData.sms_consent }},\n  \"restaurant_id\": \"{{ $('Parse Booking Params').item.json.restaurantId }}\"\n}",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000015",
+      "name": "Trigger SMS Confirmation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2240, 700],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// FORMAT BOOKING SUCCESS RESPONSE FOR VAPI\n// ============================================================\n\nconst bookingParams = $('Parse Booking Params').item.json;\nconst bookingResult = $('Call create_booking').item.json;\nconst toolCallId = bookingParams.toolCallId;\n\n// Extract reservation details\nconst reservation = bookingResult.body?.reservation || bookingResult.reservation || {};\n\n// Format date and time for voice output\nconst bookingDate = new Date(bookingParams.bookingData.datetime);\nconst dateStr = bookingDate.toLocaleDateString('en-US', { \n  weekday: 'long', \n  month: 'long', \n  day: 'numeric' \n});\nconst timeStr = bookingDate.toLocaleTimeString('en-US', { \n  hour: 'numeric', \n  minute: '2-digit',\n  hour12: true \n});\n\n// Build confirmation message\nlet message = `Perfect! I've booked a table for ${bookingParams.bookingData.party_size} `;\nmessage += `on ${dateStr} at ${timeStr} under the name ${bookingParams.customerData.name}. `;\n\n// Mention SMS if consent given\nif (bookingParams.customerData.sms_consent) {\n  message += `I'm sending a confirmation text to your phone. `;\n}\n\n// Always mention confirmation code\nmessage += `Your confirmation code is ${reservation.confirmation_code}. `;\nmessage += `Is there anything else I can help you with?`;\n\nreturn {\n  json: {\n    results: [{\n      toolCallId: toolCallId,\n      result: JSON.stringify({\n        status: 'booked',\n        reservation: {\n          id: reservation.id,\n          confirmation_code: reservation.confirmation_code,\n          datetime: bookingParams.bookingData.datetime,\n          party_size: bookingParams.bookingData.party_size,\n          customer_name: bookingParams.customerData.name,\n          seating_type: bookingParams.bookingData.seating_type,\n          special_requests: bookingParams.bookingData.special_requests\n        },\n        sms_sent: bookingParams.customerData.sms_consent,\n        message: message\n      })\n    }]\n  }\n};"
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000016",
+      "name": "Format Booking Success",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2460, 700]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// FORMAT BOOKING CONFLICT RESPONSE FOR VAPI (409 - Slot Taken)\n// ============================================================\n\nconst bookingParams = $('Parse Booking Params').item.json;\nconst toolCallId = bookingParams.toolCallId;\n\nconst message = 'I\\'m sorry, it looks like that slot was just taken by another caller. ' +\n  'Let me check what else is available. One moment please.';\n\nreturn {\n  json: {\n    results: [{\n      toolCallId: toolCallId,\n      result: JSON.stringify({\n        status: 'slot_taken',\n        error_code: 'SLOT_CONFLICT',\n        should_requery: true,\n        message: message\n      })\n    }]\n  }\n};"
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000017",
+      "name": "Format Booking Conflict",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2240, 880]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// PARSE TRANSFER_CALL PARAMETERS\n// ============================================================\n\nconst input = $input.item.json;\nconst params = input.parameters;\n\n// Define transfer queues with routing info\nconst transferQueues = {\n  'allergy_safety': { \n    phone: '+15551234568', \n    name: 'Manager',\n    slackChannel: '#urgent-calls',\n    priority: 'high',\n    slackEmoji: ':warning:'\n  },\n  'large_party': { \n    phone: '+15551234569', \n    name: 'Events Coordinator',\n    slackChannel: '#events',\n    priority: 'normal',\n    slackEmoji: ':busts_in_silhouette:'\n  },\n  'customer_request': { \n    phone: '+15551234567', \n    name: 'Front Desk',\n    slackChannel: '#voice-ai-transfers',\n    priority: 'normal',\n    slackEmoji: ':telephone_receiver:'\n  },\n  'manager_request': { \n    phone: '+15551234568', \n    name: 'Manager',\n    slackChannel: '#voice-ai-transfers',\n    priority: 'normal',\n    slackEmoji: ':bust_in_silhouette:'\n  },\n  'technical_issue': { \n    phone: '+15551234567', \n    name: 'Front Desk',\n    slackChannel: '#voice-ai-errors',\n    priority: 'low',\n    slackEmoji: ':gear:'\n  },\n  'complaint': { \n    phone: '+15551234568', \n    name: 'Manager',\n    slackChannel: '#customer-feedback',\n    priority: 'high',\n    slackEmoji: ':speech_balloon:'\n  }\n};\n\n// Get the reason (default to customer_request)\nconst reason = params.reason || 'customer_request';\nconst queue = transferQueues[reason] || transferQueues['customer_request'];\n\n// Determine if this is an urgent transfer\nconst isUrgent = queue.priority === 'high' || reason === 'allergy_safety';\n\nreturn {\n  json: {\n    error: false,\n    toolCallId: input.functionCallId,\n    restaurantId: input.restaurantId,\n    callId: input.callId,\n    callerId: input.callerId,\n    reason: reason,\n    notes: params.notes || '',\n    customerContext: params.customer_context || '',\n    transferTo: queue,\n    isUrgent: isUrgent,\n    timestamp: new Date().toISOString()\n  }\n};"
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000018",
+      "name": "Parse Transfer Params",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1140, 900]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/rpc/create_callback",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"p_restaurant_id\": \"{{ $json.restaurantId }}\",\n  \"p_call_id\": {{ $json.callId ? '\"' + $json.callId + '\"' : 'null' }},\n  \"p_caller_phone\": {{ $json.callerId ? '\"' + $json.callerId + '\"' : 'null' }},\n  \"p_reason\": \"{{ $json.reason }}\",\n  \"p_notes\": \"{{ $json.notes }}\",\n  \"p_priority\": \"{{ $json.isUrgent ? 'high' : 'normal' }}\"\n}",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000019",
+      "name": "Create Callback Record",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1360, 900],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SUPABASE_HEADER_AUTH_ID",
+          "name": "Supabase Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "is-urgent",
+              "leftValue": "={{ $('Parse Transfer Params').item.json.isUrgent }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000020",
+      "name": "Is Urgent?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1580, 900]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"channel\": \"{{ $('Parse Transfer Params').item.json.transferTo.slackChannel }}\",\n  \"username\": \"Voice AI Receptionist\",\n  \"icon_emoji\": \"{{ $('Parse Transfer Params').item.json.transferTo.slackEmoji }}\",\n  \"text\": \"{{ $('Parse Transfer Params').item.json.isUrgent ? ':rotating_light: *URGENT TRANSFER*' : ':telephone_receiver: *Call Transfer* ' }}\",\n  \"attachments\": [\n    {\n      \"color\": \"{{ $('Parse Transfer Params').item.json.isUrgent ? 'danger' : 'warning' }}\",\n      \"fields\": [\n        {\n          \"title\": \"Reason\",\n          \"value\": \"{{ $('Parse Transfer Params').item.json.reason.replace('_', ' ').toUpperCase() }}\",\n          \"short\": true\n        },\n        {\n          \"title\": \"Transfer To\",\n          \"value\": \"{{ $('Parse Transfer Params').item.json.transferTo.name }}\",\n          \"short\": true\n        },\n        {\n          \"title\": \"Notes\",\n          \"value\": \"{{ $('Parse Transfer Params').item.json.notes || 'None provided' }}\",\n          \"short\": false\n        }\n      ],\n      \"footer\": \"Voice AI | {{ $('Parse Transfer Params').item.json.timestamp }}\"\n    }\n  ]\n}",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000021",
+      "name": "Slack Alert - Urgent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1800, 820],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"channel\": \"{{ $('Parse Transfer Params').item.json.transferTo.slackChannel }}\",\n  \"username\": \"Voice AI Receptionist\",\n  \"icon_emoji\": \"{{ $('Parse Transfer Params').item.json.transferTo.slackEmoji }}\",\n  \"text\": \":telephone_receiver: *Call Transfer*\",\n  \"attachments\": [\n    {\n      \"color\": \"warning\",\n      \"fields\": [\n        {\n          \"title\": \"Reason\",\n          \"value\": \"{{ $('Parse Transfer Params').item.json.reason.replace('_', ' ') }}\",\n          \"short\": true\n        },\n        {\n          \"title\": \"Transfer To\",\n          \"value\": \"{{ $('Parse Transfer Params').item.json.transferTo.name }}\",\n          \"short\": true\n        }\n      ],\n      \"footer\": \"Voice AI | {{ $('Parse Transfer Params').item.json.timestamp }}\"\n    }\n  ]\n}",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000022",
+      "name": "Slack Alert - Normal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1800, 980],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// FORMAT TRANSFER RESPONSE FOR VAPI\n// ============================================================\n\nconst transferParams = $('Parse Transfer Params').item.json;\nconst toolCallId = transferParams.toolCallId;\nconst transferTo = transferParams.transferTo;\n\n// Build appropriate message based on reason\nlet message;\nswitch (transferParams.reason) {\n  case 'allergy_safety':\n    message = `I want to make sure we accommodate your dietary needs safely. Let me connect you with our ${transferTo.name} who can discuss our allergy protocols with you. One moment please.`;\n    break;\n  case 'large_party':\n    message = `For larger parties, our ${transferTo.name} can help with special arrangements. I'm connecting you now.`;\n    break;\n  case 'manager_request':\n    message = `Of course, I'll connect you with a ${transferTo.name} right away. One moment please.`;\n    break;\n  case 'complaint':\n    message = `I understand, and I want to make sure your concerns are heard. Let me connect you with our ${transferTo.name}. One moment please.`;\n    break;\n  case 'technical_issue':\n    message = `I apologize for the difficulty. Let me connect you with someone who can assist you directly.`;\n    break;\n  default:\n    message = `I'll connect you with our ${transferTo.name} now. One moment please.`;\n}\n\nreturn {\n  json: {\n    results: [{\n      toolCallId: toolCallId,\n      result: JSON.stringify({\n        status: 'transferring',\n        transfer: {\n          destination: transferTo.phone,\n          destination_name: transferTo.name,\n          reason: transferParams.reason\n        },\n        message: message\n      })\n    }]\n  }\n};"
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000023",
+      "name": "Format Transfer Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2020, 900]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// FORMAT SAFETY TRIGGER RESPONSE (Allergy Transfer)\n// ============================================================\n\nconst input = $input.item.json;\nconst toolCallId = input.toolCallId;\n\nreturn {\n  json: {\n    results: [{\n      toolCallId: toolCallId,\n      result: JSON.stringify({\n        status: 'safety_transfer_required',\n        safety_type: input.safetyType,\n        message: input.message,\n        action: 'transfer_to_manager'\n      })\n    }]\n  }\n};"
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000024",
+      "name": "Format Safety Transfer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1800, 620]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// FORMAT PARAMETER ERROR RESPONSE FOR VAPI\n// ============================================================\n\nconst error = $input.item.json;\nconst toolCallId = error.toolCallId;\n\n// Check if this requires a transfer\nif (error.requiresTransfer) {\n  return {\n    json: {\n      results: [{\n        toolCallId: toolCallId,\n        result: JSON.stringify({\n          status: 'transfer_required',\n          reason: error.transferReason,\n          message: error.message\n        })\n      }]\n    }\n  };\n}\n\n// Standard validation error response\nreturn {\n  json: {\n    results: [{\n      toolCallId: toolCallId,\n      result: JSON.stringify({\n        status: 'validation_error',\n        error_code: error.errorCode,\n        message: error.message,\n        requires_input: true\n      })\n    }]\n  }\n};"
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000025",
+      "name": "Format Param Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1580, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// UNKNOWN FUNCTION HANDLER\n// Return graceful error for unrecognized function calls\n// ============================================================\n\nconst input = $input.item.json;\nconst toolCallId = input.functionCallId;\n\nreturn {\n  json: {\n    results: [{\n      toolCallId: toolCallId,\n      result: JSON.stringify({\n        status: 'error',\n        error_code: 'UNKNOWN_FUNCTION',\n        message: 'I\\'m not sure how to help with that. I can help you check availability, make a reservation, or connect you with our staff.'\n      })\n    }]\n  }\n};"
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000026",
+      "name": "Unknown Function Handler",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1140, 1100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// GLOBAL ERROR HANDLER\n// Catch any unhandled errors and return fallback response\n// ============================================================\n\n// Try to extract toolCallId from various possible locations\nlet toolCallId = 'unknown';\ntry {\n  const validateNode = $('Validate Request');\n  if (validateNode && validateNode.item) {\n    toolCallId = validateNode.item.json.functionCallId || toolCallId;\n  }\n} catch (e) {\n  // If we can't get the toolCallId, use the fallback\n}\n\n// Get error details if available\nlet errorDetails = 'Unknown error';\ntry {\n  if ($input.item.json.error) {\n    errorDetails = $input.item.json.error.message || $input.item.json.message || errorDetails;\n  }\n} catch (e) {\n  // Use default error message\n}\n\n// Log the error for debugging\nconsole.error('Voice AI Webhook Error:', errorDetails);\n\nreturn {\n  json: {\n    results: [{\n      toolCallId: toolCallId,\n      result: JSON.stringify({\n        status: 'error',\n        error_code: 'SYSTEM_ERROR',\n        message: 'I\\'m having trouble accessing our reservation system right now. Can I take your phone number and have someone call you back within the next few minutes?',\n        fallback_action: 'request_callback'\n      })\n    }]\n  }\n};"
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000027",
+      "name": "Global Error Handler",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2680, 1000]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/error_logs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"source\": \"voice-ai-webhook\",\n  \"error_type\": \"workflow_error\",\n  \"error_message\": \"{{ $json.error?.message || 'Unknown error' }}\",\n  \"error_data\": {{ JSON.stringify($json) }},\n  \"created_at\": \"{{ new Date().toISOString() }}\"\n}",
+        "options": {
+          "timeout": 2000
+        }
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000028",
+      "name": "Log Error to Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2460, 1000],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SUPABASE_HEADER_AUTH_ID",
+          "name": "Supabase Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000029",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2900, 560]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.body }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000030",
+      "name": "Respond Auth Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1140, 420]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "http-error",
+              "leftValue": "={{ $json.statusCode >= 400 || $json.body?.error === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000031",
+      "name": "Availability API Error?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1800, 300],
+      "notes": "Check if Supabase returned an error"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// MERGE RESPONSES FROM ALL BRANCHES\n// This ensures we have a single output for the webhook response\n// ============================================================\n\n// Get the input from whichever branch reached this node\nconst input = $input.item.json;\n\n// Pass through the results\nreturn {\n  json: input\n};"
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000032",
+      "name": "Merge Responses",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2680, 560]
+    }
+  ],
+  "connections": {
+    "Vapi Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Request": {
+      "main": [
+        [
+          {
+            "node": "Auth Failed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auth Failed?": {
+      "main": [
+        [
+          {
+            "node": "Auth Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Route by Function",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auth Error Response": {
+      "main": [
+        [
+          {
+            "node": "Respond Auth Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Function": {
+      "main": [
+        [
+          {
+            "node": "Parse Availability Params",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Parse Booking Params",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Parse Transfer Params",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Unknown Function Handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Availability Params": {
+      "main": [
+        [
+          {
+            "node": "Availability Params Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Availability Params Valid?": {
+      "main": [
+        [
+          {
+            "node": "Format Param Error",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Call check_availability",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call check_availability": {
+      "main": [
+        [
+          {
+            "node": "Availability API Error?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Error to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Availability API Error?": {
+      "main": [
+        [
+          {
+            "node": "Log Error to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Availability Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Availability Response": {
+      "main": [
+        [
+          {
+            "node": "Merge Responses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Booking Params": {
+      "main": [
+        [
+          {
+            "node": "Booking Params Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Booking Params Valid?": {
+      "main": [
+        [
+          {
+            "node": "Format Param Error",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safety Trigger?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Safety Trigger?": {
+      "main": [
+        [
+          {
+            "node": "Format Safety Transfer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Call create_booking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Safety Transfer": {
+      "main": [
+        [
+          {
+            "node": "Merge Responses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call create_booking": {
+      "main": [
+        [
+          {
+            "node": "Booking Successful?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Error to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Booking Successful?": {
+      "main": [
+        [
+          {
+            "node": "Trigger SMS Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Booking Conflict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger SMS Confirmation": {
+      "main": [
+        [
+          {
+            "node": "Format Booking Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Booking Success": {
+      "main": [
+        [
+          {
+            "node": "Merge Responses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Booking Conflict": {
+      "main": [
+        [
+          {
+            "node": "Merge Responses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Transfer Params": {
+      "main": [
+        [
+          {
+            "node": "Create Callback Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Callback Record": {
+      "main": [
+        [
+          {
+            "node": "Is Urgent?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Urgent?": {
+      "main": [
+        [
+          {
+            "node": "Slack Alert - Urgent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slack Alert - Normal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Alert - Urgent": {
+      "main": [
+        [
+          {
+            "node": "Format Transfer Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Alert - Normal": {
+      "main": [
+        [
+          {
+            "node": "Format Transfer Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Transfer Response": {
+      "main": [
+        [
+          {
+            "node": "Merge Responses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Param Error": {
+      "main": [
+        [
+          {
+            "node": "Merge Responses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unknown Function Handler": {
+      "main": [
+        [
+          {
+            "node": "Merge Responses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Error to Supabase": {
+      "main": [
+        [
+          {
+            "node": "Global Error Handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Global Error Handler": {
+      "main": [
+        [
+          {
+            "node": "Merge Responses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Responses": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionTimeout": 30,
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "voice-ai-error-handler"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "id": "tag-voice-ai",
+      "name": "voice-ai"
+    },
+    {
+      "id": "tag-production",
+      "name": "production"
+    },
+    {
+      "id": "tag-webhook",
+      "name": "webhook"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2024-01-15T00:00:00.000Z",
+  "versionId": "1.0.0",
+  "meta": {
+    "templateId": "voice-ai-webhook-handler",
+    "instanceId": "voice-ai-receptionist",
+    "notes": "Main webhook handler for Vapi Voice AI function calls. Handles check_availability, book_appointment, and transfer_call functions with full error handling and Supabase integration."
+  }
+}

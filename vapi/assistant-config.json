@@ -1,0 +1,365 @@
+{
+  "_comment": "=============================================================================",
+  "_comment_1": "VAPI ASSISTANT CONFIGURATION - Restaurant AI Receptionist",
+  "_comment_2": "Based on Section 2.4 and 2.6 of the Restaurant AI Automation Master Guide",
+  "_comment_3": "=============================================================================",
+  "_comment_4": "NOTE: This file contains the complete configuration for import into Vapi.",
+  "_comment_5": "Before deploying, replace all {{PLACEHOLDER}} values with actual values.",
+  "_comment_6": "See SETUP_INSTRUCTIONS.md for deployment steps.",
+  "_comment_7": "=============================================================================",
+
+  "name": "Restaurant AI Receptionist",
+
+  "_comment_model": "------------ LLM Configuration ------------",
+  "_comment_model_1": "GPT-4o provides the best balance of speed, accuracy, and cost for voice AI.",
+  "_comment_model_2": "Temperature 0.7 allows natural conversation while maintaining accuracy.",
+  "_comment_model_3": "Max 500 tokens keeps responses concise (important for voice UX).",
+  "model": {
+    "provider": "openai",
+    "model": "gpt-4o",
+    "temperature": 0.7,
+    "maxTokens": 500,
+    "emotionRecognitionEnabled": true,
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are the Front-of-House AI Host for {{RESTAURANT_NAME}}.\n\n## CORE MISSION\n\nAssist callers with reservations and answer FAQs efficiently while maintaining a warm, professional demeanor. Your goal is to book tables and answer questions, not to have long conversations.\n\n## CRITICAL SAFETY RULES (NEVER VIOLATE)\n\n1. **ALLERGY SAFETY**: If caller mentions \"allergy\", \"anaphylactic\", \"epipen\", or asks if food is \"safe\" for allergies:\n   - DO NOT confirm any food is safe\n   - Say: \"For your safety, I cannot guarantee allergen-free preparation. Let me transfer you to a manager who can discuss our kitchen practices.\"\n   - Execute `transfer_call` with reason \"allergy_safety\" IMMEDIATELY\n\n2. **LARGE PARTIES**: If party_size > 8:\n   - Say: \"Groups over 8 require special arrangements including a deposit and set menu options. Let me connect you with our events team.\"\n   - Execute `transfer_call` with reason \"large_party\"\n\n3. **SYSTEM ERRORS**: If any tool returns an error:\n   - NEVER make up availability or confirm bookings\n   - Say: \"I'm having trouble accessing our calendar. Can I take your number and have a manager call you back within 10 minutes?\"\n\n4. **NO COMPENSATION**: NEVER offer discounts, free items, gift cards, or any monetary compensation.\n\n5. **NO LIABILITY**: NEVER say \"it was our fault\", \"we guarantee\", or make promises about food safety.\n\n## CONVERSATION FLOW\n\n### Booking Flow\nCollect in order: party size → date → time → name → phone → SMS consent\n\n### Step 1: Check Availability\n- ALWAYS use `check_availability` tool BEFORE confirming any slot\n- If exact time unavailable, offer 2-3 alternatives\n- Maximum 3 negotiation attempts\n\n### Step 2: Confirm Booking\n- Use `book_appointment` only after slot confirmed available AND all info collected\n- TCPA: Ask \"Should I text you a confirmation?\" before setting sms_consent=true\n\n## RESPONSE GUIDELINES\n\n1. Keep responses under 2 sentences\n2. Be conversational, not robotic\n3. Repeat back key details to confirm\n4. For tool latency: \"Let me check that for you...\" or \"One moment...\"\n\n## FAQ RESPONSES\n\n- Hours: \"We're open Tuesday through Sunday, 5 to 10 PM weekdays, until 11 on weekends. Closed Mondays.\"\n- Parking: \"Valet is $15, free street parking available after 6 PM.\"\n- Dietary: \"We accommodate gluten-free and vegan. For allergies, I'll transfer you to a manager.\"\n- Cancellation: \"Cancel 24 hours ahead via your confirmation text. Over 6 guests: $25/person no-show fee.\"\n\n## TOOL USAGE\n\n- `check_availability`: Call before confirming ANY time slot\n- `book_appointment`: Only after availability confirmed + all fields collected\n- `transfer_call`: Immediately for allergy/large party/manager requests"
+      }
+    ]
+  },
+
+  "_comment_voice": "------------ Voice Configuration ------------",
+  "_comment_voice_1": "ElevenLabs provides the most natural-sounding voices for phone conversations.",
+  "_comment_voice_2": "Rachel (EXAVITQu4vr4xnSDxMaL) is friendly, professional, and clear.",
+  "_comment_voice_3": "Alternative: Sarah (a0e99841-438c-4a64-b679-ae501e7d6091) for warmer tone.",
+  "_comment_voice_4": "Stability 0.5 balances consistency with natural variation.",
+  "_comment_voice_5": "SimilarityBoost 0.75 maintains voice character while allowing expression.",
+  "voice": {
+    "provider": "11labs",
+    "voiceId": "EXAVITQu4vr4xnSDxMaL",
+    "stability": 0.5,
+    "similarityBoost": 0.75,
+    "style": 0.5,
+    "useSpeakerBoost": true,
+    "optimizeStreamingLatency": 3,
+    "_available_voices": {
+      "rachel_friendly": "EXAVITQu4vr4xnSDxMaL",
+      "sarah_warm": "a0e99841-438c-4a64-b679-ae501e7d6091",
+      "josh_male": "TxGEqnHWrfWFTfGW9XjX",
+      "bella_young": "EXAVITQu4vr4xnSDxMaL"
+    }
+  },
+
+  "_comment_transcriber": "------------ Speech-to-Text Configuration ------------",
+  "_comment_transcriber_1": "Deepgram Nova-2 offers best accuracy for conversational speech.",
+  "_comment_transcriber_2": "Keywords boost recognition of restaurant-specific terms.",
+  "_comment_transcriber_3": "SmartFormat handles numbers, dates, and punctuation automatically.",
+  "transcriber": {
+    "provider": "deepgram",
+    "model": "nova-2",
+    "language": "en-US",
+    "smartFormat": true,
+    "punctuate": true,
+    "profanityFilter": false,
+    "redact": false,
+    "diarize": false,
+    "numerals": true,
+    "keywords": [
+      "reservation:3",
+      "table:2",
+      "booking:2",
+      "party:2",
+      "allergy:5",
+      "allergic:5",
+      "peanut:4",
+      "nut:4",
+      "gluten:3",
+      "vegetarian:2",
+      "vegan:2",
+      "manager:2",
+      "cancel:2",
+      "confirm:2"
+    ],
+    "_keywords_note": "Format is 'word:boost' where boost is 1-5. Higher = more likely to be recognized."
+  },
+
+  "_comment_messages": "------------ Conversation Messages ------------",
+  "_comment_messages_1": "firstMessage is spoken immediately when call connects.",
+  "_comment_messages_2": "Use {{restaurant_name}} variable for multi-tenant deployments.",
+  "firstMessage": "Thank you for calling {{restaurant_name}}. How can I help you today?",
+  "endCallMessage": "Thank you for calling {{restaurant_name}}. We look forward to seeing you!",
+  "endCallPhrases": [
+    "goodbye",
+    "bye",
+    "that's all",
+    "thank you that's it",
+    "nothing else",
+    "have a good day",
+    "I'm all set"
+  ],
+
+  "_comment_timing": "------------ Timing Configuration ------------",
+  "_comment_timing_1": "silenceTimeoutSeconds: End call after this many seconds of silence.",
+  "_comment_timing_2": "10 seconds is appropriate for giving caller time to think.",
+  "_comment_timing_3": "maxDurationSeconds: 300 (5 min) covers 95% of reservation calls.",
+  "_comment_timing_4": "Prevents runaway calls that increase costs.",
+  "silenceTimeoutSeconds": 10,
+  "maxDurationSeconds": 300,
+  "responseDelaySeconds": 0.5,
+  "llmRequestDelaySeconds": 0.1,
+  "numWordsToInterruptAssistant": 2,
+  "interruptionsEnabled": true,
+
+  "_comment_audio": "------------ Audio Configuration ------------",
+  "_comment_audio_1": "backgroundSound 'office' provides subtle ambient noise.",
+  "_comment_audio_2": "This makes the AI sound less robotic and more like a real call center.",
+  "_comment_audio_3": "backgroundDenoisingEnabled removes background noise from caller.",
+  "backgroundSound": "office",
+  "backgroundDenoisingEnabled": true,
+  "modelOutputInMessagesEnabled": true,
+  "hipaaEnabled": false,
+
+  "_comment_recording": "------------ Recording Configuration ------------",
+  "_comment_recording_1": "recordingEnabled captures calls for quality assurance and training.",
+  "_comment_recording_2": "Ensure compliance with state recording consent laws (two-party states).",
+  "_comment_recording_3": "Consider adding recording disclosure to firstMessage if required.",
+  "recordingEnabled": true,
+  "videoRecordingEnabled": false,
+  "artifactPlan": {
+    "recordingEnabled": true,
+    "recordingPath": "recordings/{{call.id}}.wav"
+  },
+
+  "_comment_tools": "------------ Function Tools Configuration ------------",
+  "_comment_tools_1": "Tools enable the AI to take actions: check availability, make bookings, transfer.",
+  "_comment_tools_2": "Each tool definition must match what your n8n webhook expects.",
+  "_comment_tools_3": "Server-side tools are called via serverUrl webhook.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "check_availability",
+        "description": "Check if a table is available for a specific date, time, and party size. ALWAYS call this before confirming any reservation time to the caller.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "search_datetime": {
+              "type": "string",
+              "format": "date-time",
+              "description": "The date and time to check availability for, in ISO 8601 format (e.g., '2024-03-15T19:00:00')"
+            },
+            "party_size": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20,
+              "description": "Number of guests in the party"
+            },
+            "seating_preference": {
+              "type": "string",
+              "enum": ["any", "indoor", "outdoor", "bar", "patio", "private"],
+              "default": "any",
+              "description": "Preferred seating type. Default to 'any' unless caller specifies."
+            }
+          },
+          "required": ["search_datetime", "party_size"]
+        }
+      },
+      "server": {
+        "url": "{{N8N_WEBHOOK_URL}}/webhook/vapi-restaurant",
+        "secret": "{{VAPI_WEBHOOK_SECRET}}",
+        "timeoutSeconds": 5
+      },
+      "async": false
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "book_appointment",
+        "description": "Create a reservation after availability has been confirmed. Only call this after: 1) check_availability returned 'available', 2) all customer details collected, 3) SMS consent obtained verbally.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "customer_name": {
+              "type": "string",
+              "description": "Full name for the reservation"
+            },
+            "customer_phone": {
+              "type": "string",
+              "description": "Phone number with area code (e.g., '555-123-4567' or '5551234567')"
+            },
+            "datetime": {
+              "type": "string",
+              "format": "date-time",
+              "description": "Confirmed reservation date and time in ISO 8601 format"
+            },
+            "party_size": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20,
+              "description": "Number of guests"
+            },
+            "seating_type": {
+              "type": "string",
+              "enum": ["any", "indoor", "outdoor", "bar", "patio", "private"],
+              "default": "any",
+              "description": "Seating preference"
+            },
+            "special_requests": {
+              "type": "string",
+              "description": "Any special requests (birthday, high chair, wheelchair access, etc.)"
+            },
+            "sms_consent": {
+              "type": "boolean",
+              "default": true,
+              "description": "Whether caller consented to receive SMS confirmation. Must ask before setting to true."
+            }
+          },
+          "required": ["customer_name", "customer_phone", "datetime", "party_size"]
+        }
+      },
+      "server": {
+        "url": "{{N8N_WEBHOOK_URL}}/webhook/vapi-restaurant",
+        "secret": "{{VAPI_WEBHOOK_SECRET}}",
+        "timeoutSeconds": 8
+      },
+      "async": false
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "transfer_call",
+        "description": "Transfer the call to a human staff member. Use IMMEDIATELY for: allergy mentions, parties over 8, explicit manager requests, or system errors.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string",
+              "enum": [
+                "allergy_safety",
+                "large_party",
+                "manager_request",
+                "customer_request",
+                "complaint",
+                "technical_issue"
+              ],
+              "description": "Reason for the transfer"
+            },
+            "notes": {
+              "type": "string",
+              "description": "Context for the receiving agent (e.g., 'Caller has severe nut allergy')"
+            },
+            "customer_context": {
+              "type": "string",
+              "description": "Summary of conversation so far to help receiving agent"
+            }
+          },
+          "required": ["reason"]
+        }
+      },
+      "server": {
+        "url": "{{N8N_WEBHOOK_URL}}/webhook/vapi-restaurant",
+        "secret": "{{VAPI_WEBHOOK_SECRET}}",
+        "timeoutSeconds": 5
+      },
+      "async": false
+    }
+  ],
+
+  "_comment_server": "------------ Webhook Configuration ------------",
+  "_comment_server_1": "serverUrl receives all function calls and conversation events.",
+  "_comment_server_2": "serverUrlSecret is sent as X-Vapi-Secret header for authentication.",
+  "_comment_server_3": "Replace with your actual n8n webhook URL and secret.",
+  "serverUrl": "{{N8N_WEBHOOK_URL}}/webhook/vapi-restaurant",
+  "serverUrlSecret": "{{VAPI_WEBHOOK_SECRET}}",
+
+  "_comment_metadata": "------------ Metadata Configuration ------------",
+  "_comment_metadata_1": "Metadata is passed to webhook for multi-tenant routing.",
+  "_comment_metadata_2": "restaurantId identifies which restaurant this call is for.",
+  "_comment_metadata_3": "Override this per-call for multi-restaurant deployments.",
+  "metadata": {
+    "restaurantId": "{{DEFAULT_RESTAURANT_ID}}",
+    "environment": "production",
+    "version": "1.0.0"
+  },
+
+  "_comment_analysis": "------------ Post-Call Analysis Configuration ------------",
+  "_comment_analysis_1": "Vapi automatically analyzes calls after completion.",
+  "_comment_analysis_2": "summaryPrompt generates a call summary for logging.",
+  "_comment_analysis_3": "structuredDataSchema extracts structured data for analytics.",
+  "analysisPlan": {
+    "summaryPrompt": "Summarize this restaurant reservation call in 2-3 sentences. Include:\n1. Caller's intent (booking, FAQ, complaint, other)\n2. Outcome (reservation made, transferred to staff, abandoned, FAQ answered)\n3. Any notable issues or safety triggers",
+    "summaryRequestTimeoutSeconds": 30,
+    "successEvaluationPrompt": "Evaluate if the caller's needs were met on a scale of 1-5:\n5 = Fully satisfied (booking completed or question answered)\n4 = Mostly satisfied (alternatives offered and accepted)\n3 = Partially satisfied (transferred appropriately)\n2 = Unsatisfied (call abandoned without resolution)\n1 = Failure (system error or inappropriate response)\n\nProvide the score and a brief explanation.",
+    "successEvaluationRubric": "NumericScale",
+    "structuredDataPrompt": "Extract the following information from the call:",
+    "structuredDataSchema": {
+      "type": "object",
+      "properties": {
+        "callIntent": {
+          "type": "string",
+          "enum": ["booking", "modify_booking", "cancel_booking", "faq", "complaint", "transfer_request", "other"],
+          "description": "Primary intent of the caller"
+        },
+        "callOutcome": {
+          "type": "string",
+          "enum": ["booking_completed", "booking_attempted", "transferred", "callback_scheduled", "faq_answered", "abandoned", "error"],
+          "description": "How the call concluded"
+        },
+        "partySize": {
+          "type": "integer",
+          "description": "Number of guests if mentioned"
+        },
+        "requestedDate": {
+          "type": "string",
+          "description": "Date requested for reservation if mentioned"
+        },
+        "requestedTime": {
+          "type": "string",
+          "description": "Time requested for reservation if mentioned"
+        },
+        "safetyTriggerActivated": {
+          "type": "boolean",
+          "description": "Whether allergy or large party safety rules were triggered"
+        },
+        "safetyTriggerType": {
+          "type": "string",
+          "enum": ["allergy", "large_party", "none"],
+          "description": "Type of safety trigger if activated"
+        },
+        "customerSentiment": {
+          "type": "string",
+          "enum": ["positive", "neutral", "frustrated", "angry"],
+          "description": "Overall sentiment of the caller"
+        },
+        "specialRequests": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Any special requests mentioned (birthday, high chair, etc.)"
+        }
+      },
+      "required": ["callIntent", "callOutcome"]
+    }
+  },
+
+  "_comment_transport": "------------ Call Transport Configuration ------------",
+  "_comment_transport_1": "Configure SIP or phone number for inbound calls.",
+  "_comment_transport_2": "Use Twilio integration for best US phone number support.",
+  "transportConfigurations": [
+    {
+      "provider": "twilio",
+      "phoneNumber": "{{TWILIO_PHONE_NUMBER}}",
+      "phoneNumberId": "{{TWILIO_PHONE_NUMBER_ID}}"
+    }
+  ],
+
+  "_comment_credentials": "------------ Credentials Reference ------------",
+  "_comment_credentials_1": "These credential IDs are set up in Vapi dashboard.",
+  "_comment_credentials_2": "See SETUP_INSTRUCTIONS.md for credential configuration.",
+  "credentialIds": {
+    "_note": "Configure these in Vapi Dashboard > Credentials",
+    "openai": "{{VAPI_OPENAI_CREDENTIAL_ID}}",
+    "elevenlabs": "{{VAPI_ELEVENLABS_CREDENTIAL_ID}}",
+    "deepgram": "{{VAPI_DEEPGRAM_CREDENTIAL_ID}}",
+    "twilio": "{{VAPI_TWILIO_CREDENTIAL_ID}}"
+  }
+}

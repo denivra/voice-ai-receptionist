@@ -1,0 +1,442 @@
+{
+  "name": "Voice AI Monitoring & Alerts",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Every 5 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Get error rate for last 10 minutes\nSELECT \n  COUNT(*) as total_calls,\n  COUNT(*) FILTER (WHERE status = 'failed') as failed_calls,\n  ROUND(100.0 * COUNT(*) FILTER (WHERE status = 'failed') / NULLIF(COUNT(*), 0), 2) as error_rate,\n  COUNT(*) FILTER (WHERE status = 'completed') as completed_calls,\n  ROUND(100.0 * COUNT(*) FILTER (WHERE status = 'completed') / NULLIF(COUNT(*), 0), 2) as completion_rate,\n  ROUND(AVG(duration_seconds), 0) as avg_duration_seconds,\n  COUNT(*) FILTER (WHERE outcome = 'booking_made') as bookings_made,\n  COUNT(*) FILTER (WHERE outcome = 'transfer') as transfers\nFROM call_logs\nWHERE started_at > NOW() - INTERVAL '10 minutes';",
+        "options": {}
+      },
+      "id": "check-error-rate",
+      "name": "Check Error Rate",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [460, 180],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-db",
+          "name": "Supabase Database"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Get pending callbacks count and oldest\nSELECT \n  COUNT(*) as pending_count,\n  COUNT(*) FILTER (WHERE priority = 'urgent') as urgent_count,\n  COUNT(*) FILTER (WHERE priority = 'high') as high_count,\n  EXTRACT(EPOCH FROM (NOW() - MIN(created_at))) / 60 as oldest_pending_minutes,\n  COUNT(*) FILTER (WHERE created_at < NOW() - INTERVAL '30 minutes') as over_30_min,\n  COUNT(*) FILTER (WHERE created_at < NOW() - INTERVAL '1 hour') as over_1_hour\nFROM callbacks\nWHERE status IN ('pending', 'in_progress');",
+        "options": {}
+      },
+      "id": "check-pending-callbacks",
+      "name": "Check Pending Callbacks",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [460, 300],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-db",
+          "name": "Supabase Database"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Get hourly metrics for trend analysis\nSELECT \n  DATE_TRUNC('hour', started_at) as hour,\n  COUNT(*) as total_calls,\n  ROUND(100.0 * COUNT(*) FILTER (WHERE status = 'failed') / NULLIF(COUNT(*), 0), 2) as error_rate,\n  ROUND(AVG(CASE WHEN webhook_latency_ms IS NOT NULL THEN webhook_latency_ms END), 0) as avg_latency_ms,\n  ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY webhook_latency_ms) FILTER (WHERE webhook_latency_ms IS NOT NULL), 0) as p95_latency_ms\nFROM call_logs\nWHERE started_at > NOW() - INTERVAL '1 hour'\nGROUP BY DATE_TRUNC('hour', started_at)\nORDER BY hour DESC\nLIMIT 1;",
+        "options": {}
+      },
+      "id": "check-latency",
+      "name": "Check Latency",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [460, 420],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-db",
+          "name": "Supabase Database"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      },
+      "id": "merge-metrics",
+      "name": "Merge Metrics",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Combine all metrics and evaluate alert conditions\nconst errorData = $input.all()[0].json;\nconst callbackData = $input.all()[1].json;\nconst latencyData = $input.all()[2].json;\n\n// Thresholds from Section 6.1\nconst THRESHOLDS = {\n  error_rate: {\n    critical: 20,\n    high: 10,\n    warning: 5\n  },\n  latency_p95_ms: {\n    critical: 4000,\n    high: 3000,\n    warning: 2000\n  },\n  completion_rate: {\n    critical: 85,\n    warning: 90\n  },\n  pending_callbacks: {\n    critical: 20,\n    high: 10,\n    warning: 5\n  },\n  callback_age_minutes: {\n    critical: 120,\n    high: 60,\n    warning: 30\n  }\n};\n\nconst alerts = [];\nlet overallStatus = 'healthy';\n\n// Check error rate\nconst errorRate = parseFloat(errorData.error_rate) || 0;\nif (errorRate >= THRESHOLDS.error_rate.critical) {\n  alerts.push({\n    severity: 'CRITICAL',\n    metric: 'Error Rate',\n    value: `${errorRate}%`,\n    threshold: `>${THRESHOLDS.error_rate.critical}%`,\n    message: `Critical error rate: ${errorRate}% of calls failing`\n  });\n  overallStatus = 'critical';\n} else if (errorRate >= THRESHOLDS.error_rate.high) {\n  alerts.push({\n    severity: 'HIGH',\n    metric: 'Error Rate',\n    value: `${errorRate}%`,\n    threshold: `>${THRESHOLDS.error_rate.high}%`,\n    message: `High error rate: ${errorRate}% of calls failing`\n  });\n  if (overallStatus !== 'critical') overallStatus = 'degraded';\n}\n\n// Check latency\nconst p95Latency = parseInt(latencyData.p95_latency_ms) || 0;\nif (p95Latency >= THRESHOLDS.latency_p95_ms.critical) {\n  alerts.push({\n    severity: 'HIGH',\n    metric: 'Response Latency',\n    value: `${p95Latency}ms`,\n    threshold: `>${THRESHOLDS.latency_p95_ms.critical}ms`,\n    message: `High latency detected: p95 = ${p95Latency}ms`\n  });\n  if (overallStatus !== 'critical') overallStatus = 'degraded';\n}\n\n// Check completion rate\nconst completionRate = parseFloat(errorData.completion_rate) || 100;\nif (completionRate < THRESHOLDS.completion_rate.critical) {\n  alerts.push({\n    severity: 'MEDIUM',\n    metric: 'Completion Rate',\n    value: `${completionRate}%`,\n    threshold: `<${THRESHOLDS.completion_rate.critical}%`,\n    message: `Low completion rate: only ${completionRate}% of calls completing`\n  });\n  if (overallStatus === 'healthy') overallStatus = 'warning';\n}\n\n// Check pending callbacks\nconst pendingCallbacks = parseInt(callbackData.pending_count) || 0;\nconst urgentCallbacks = parseInt(callbackData.urgent_count) || 0;\nconst oldestMinutes = parseFloat(callbackData.oldest_pending_minutes) || 0;\n\nif (pendingCallbacks >= THRESHOLDS.pending_callbacks.critical) {\n  alerts.push({\n    severity: 'HIGH',\n    metric: 'Pending Callbacks',\n    value: pendingCallbacks.toString(),\n    threshold: `>${THRESHOLDS.pending_callbacks.critical}`,\n    message: `${pendingCallbacks} callbacks pending (${urgentCallbacks} urgent)`\n  });\n  if (overallStatus !== 'critical') overallStatus = 'degraded';\n}\n\n// Check callback age\nif (oldestMinutes >= THRESHOLDS.callback_age_minutes.critical) {\n  alerts.push({\n    severity: 'HIGH',\n    metric: 'Callback Age',\n    value: `${Math.round(oldestMinutes)} minutes`,\n    threshold: `>${THRESHOLDS.callback_age_minutes.critical} minutes`,\n    message: `Oldest callback is ${Math.round(oldestMinutes)} minutes old`\n  });\n  if (overallStatus !== 'critical') overallStatus = 'degraded';\n}\n\n// Build metrics summary\nconst metrics = {\n  timestamp: new Date().toISOString(),\n  status: overallStatus,\n  calls: {\n    total: parseInt(errorData.total_calls) || 0,\n    completed: parseInt(errorData.completed_calls) || 0,\n    failed: parseInt(errorData.failed_calls) || 0,\n    error_rate: errorRate,\n    completion_rate: completionRate,\n    avg_duration_seconds: parseInt(errorData.avg_duration_seconds) || 0,\n    bookings_made: parseInt(errorData.bookings_made) || 0,\n    transfers: parseInt(errorData.transfers) || 0\n  },\n  callbacks: {\n    pending: pendingCallbacks,\n    urgent: urgentCallbacks,\n    high: parseInt(callbackData.high_count) || 0,\n    oldest_minutes: Math.round(oldestMinutes),\n    over_30_min: parseInt(callbackData.over_30_min) || 0,\n    over_1_hour: parseInt(callbackData.over_1_hour) || 0\n  },\n  latency: {\n    avg_ms: parseInt(latencyData.avg_latency_ms) || 0,\n    p95_ms: p95Latency\n  },\n  alerts: alerts\n};\n\nreturn {\n  json: {\n    metrics,\n    hasAlerts: alerts.length > 0,\n    hasCritical: alerts.some(a => a.severity === 'CRITICAL'),\n    hasHigh: alerts.some(a => a.severity === 'HIGH'),\n    alertCount: alerts.length\n  }\n};"
+      },
+      "id": "evaluate-alerts",
+      "name": "Evaluate Alerts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-alerts",
+              "leftValue": "={{ $json.hasAlerts }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-has-alerts",
+      "name": "Has Alerts?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst metrics = data.metrics;\nconst alerts = metrics.alerts;\n\n// Severity colors and emojis\nconst severityConfig = {\n  CRITICAL: { emoji: '🔴', color: '#dc2626' },\n  HIGH: { emoji: '🟠', color: '#ea580c' },\n  MEDIUM: { emoji: '🟡', color: '#ca8a04' },\n  LOW: { emoji: '🔵', color: '#2563eb' }\n};\n\n// Build Slack blocks\nconst blocks = [];\n\n// Header\nconst statusEmoji = metrics.status === 'critical' ? '🚨' : metrics.status === 'degraded' ? '⚠️' : '✅';\nblocks.push({\n  type: 'header',\n  text: {\n    type: 'plain_text',\n    text: `${statusEmoji} Voice AI Alert - ${metrics.status.toUpperCase()}`,\n    emoji: true\n  }\n});\n\n// Alert details\nalerts.forEach(alert => {\n  const config = severityConfig[alert.severity];\n  blocks.push({\n    type: 'section',\n    text: {\n      type: 'mrkdwn',\n      text: `${config.emoji} *${alert.severity}*: ${alert.message}\\n_Metric: ${alert.metric} = ${alert.value} (threshold: ${alert.threshold})_`\n    }\n  });\n});\n\n// Divider\nblocks.push({ type: 'divider' });\n\n// Metrics summary\nblocks.push({\n  type: 'section',\n  fields: [\n    {\n      type: 'mrkdwn',\n      text: `*Calls (10 min)*\\n${metrics.calls.total} total\\n${metrics.calls.error_rate}% error rate`\n    },\n    {\n      type: 'mrkdwn',\n      text: `*Callbacks*\\n${metrics.callbacks.pending} pending\\n${metrics.callbacks.urgent} urgent`\n    },\n    {\n      type: 'mrkdwn',\n      text: `*Latency*\\np95: ${metrics.latency.p95_ms}ms\\navg: ${metrics.latency.avg_ms}ms`\n    },\n    {\n      type: 'mrkdwn',\n      text: `*Bookings*\\n${metrics.calls.bookings_made} made\\n${metrics.calls.transfers} transfers`\n    }\n  ]\n});\n\n// Context\nblocks.push({\n  type: 'context',\n  elements: [\n    {\n      type: 'mrkdwn',\n      text: `Timestamp: ${new Date(metrics.timestamp).toLocaleString()}`\n    }\n  ]\n});\n\n// Actions for critical alerts\nif (data.hasCritical) {\n  blocks.push({\n    type: 'actions',\n    elements: [\n      {\n        type: 'button',\n        text: {\n          type: 'plain_text',\n          text: '📞 Enable Fallback Mode',\n          emoji: true\n        },\n        style: 'danger',\n        action_id: 'enable_fallback'\n      },\n      {\n        type: 'button',\n        text: {\n          type: 'plain_text',\n          text: '📊 View Dashboard',\n          emoji: true\n        },\n        url: '${PORTAL_URL}/dashboard',\n        action_id: 'view_dashboard'\n      }\n    ]\n  });\n}\n\nreturn {\n  json: {\n    channel: data.hasCritical ? '#voice-ai-critical' : '#voice-ai-alerts',\n    text: `${statusEmoji} Voice AI ${metrics.status.toUpperCase()}: ${alerts.length} alert(s)`,\n    blocks: blocks,\n    unfurl_links: false,\n    unfurl_media: false\n  }\n};"
+      },
+      "id": "format-slack-message",
+      "name": "Format Slack Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 180]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "={{ $json.channel }}",
+          "mode": "id"
+        },
+        "text": "={{ $json.text }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false,
+          "blocks": "={{ $json.blocks }}"
+        }
+      },
+      "id": "send-slack-alert",
+      "name": "Send Slack Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [1560, 180],
+      "credentials": {
+        "slackOAuth2Api": {
+          "id": "slack-oauth",
+          "name": "Slack OAuth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Record monitoring check result\nINSERT INTO analytics_daily (restaurant_id, date, metrics, updated_at)\nVALUES (\n  (SELECT id FROM restaurants LIMIT 1),\n  CURRENT_DATE,\n  $1::jsonb,\n  NOW()\n)\nON CONFLICT (restaurant_id, date)\nDO UPDATE SET\n  metrics = analytics_daily.metrics || $1::jsonb,\n  updated_at = NOW();",
+        "options": {
+          "queryParams": "={{ JSON.stringify($json.metrics) }}"
+        }
+      },
+      "id": "log-metrics",
+      "name": "Log Metrics",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1340, 420],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-db",
+          "name": "Supabase Database"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "no-alerts",
+      "name": "No Alerts - Continue",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "is-critical",
+              "leftValue": "={{ $json.hasCritical }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-critical",
+      "name": "Is Critical?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1780, 180]
+    },
+    {
+      "parameters": {
+        "resource": "channel",
+        "message": "<!channel> 🚨 *CRITICAL ALERT*: Voice AI system requires immediate attention!",
+        "channelId": {
+          "__rl": true,
+          "value": "#voice-ai-critical",
+          "mode": "name"
+        },
+        "otherOptions": {}
+      },
+      "id": "notify-channel",
+      "name": "Notify @channel",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [2000, 60],
+      "credentials": {
+        "slackOAuth2Api": {
+          "id": "slack-oauth",
+          "name": "Slack OAuth"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "done-non-critical",
+      "name": "Done (Non-Critical)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [2000, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Get n8n execution failures from system (if available)\n-- This is a placeholder - actual implementation depends on n8n setup\nSELECT \n  'n8n_check' as check_type,\n  NOW() as checked_at,\n  'ok' as status;",
+        "options": {}
+      },
+      "id": "check-n8n-health",
+      "name": "Check n8n Health",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [460, 540],
+      "credentials": {
+        "postgres": {
+          "id": "supabase-db",
+          "name": "Supabase Database"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 5 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Check Error Rate",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Check Pending Callbacks",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Check Latency",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Check n8n Health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Error Rate": {
+      "main": [
+        [
+          {
+            "node": "Merge Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Pending Callbacks": {
+      "main": [
+        [
+          {
+            "node": "Merge Metrics",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Check Latency": {
+      "main": [
+        [
+          {
+            "node": "Merge Metrics",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Merge Metrics": {
+      "main": [
+        [
+          {
+            "node": "Evaluate Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate Alerts": {
+      "main": [
+        [
+          {
+            "node": "Has Alerts?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Alerts?": {
+      "main": [
+        [
+          {
+            "node": "Format Slack Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Alerts - Continue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Slack Message": {
+      "main": [
+        [
+          {
+            "node": "Send Slack Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Slack Alert": {
+      "main": [
+        [
+          {
+            "node": "Is Critical?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Critical?": {
+      "main": [
+        [
+          {
+            "node": "Notify @channel",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Done (Non-Critical)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "error-handler"
+  },
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "voice-ai-receptionist"
+  },
+  "id": "monitoring-alerts",
+  "tags": [
+    {
+      "id": "monitoring",
+      "name": "monitoring"
+    },
+    {
+      "id": "voice-ai",
+      "name": "voice-ai"
+    }
+  ],
+  "pinData": {},
+  "staticData": null,
+  "triggerCount": 0
+}

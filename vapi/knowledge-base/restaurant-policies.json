@@ -1,0 +1,885 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "_meta": {
+    "name": "restaurant_policies",
+    "version": "1.0.0",
+    "description": "Structured knowledge base for Voice AI Receptionist FAQ responses",
+    "reference": "Section 2.6 of Restaurant AI Automation Master Guide",
+    "usage": "This file is loaded by the AI assistant to answer common questions. Edit via portal or directly."
+  },
+
+  "version": "1.0",
+  "restaurant_id": "{{RESTAURANT_ID}}",
+  "last_updated": "{{TIMESTAMP}}",
+  "updated_by": "{{ADMIN_EMAIL}}",
+
+  "_instructions": {
+    "for_portal_developers": "Each policy entry can have either 'answer' (AI speaks this) OR 'hard_rule' (triggers special behavior). Never both.",
+    "hard_rule_values": {
+      "TRANSFER_IMMEDIATELY": "Call transfer_call tool with reason from entry",
+      "CHECK_AVAILABILITY": "Must call check_availability before answering",
+      "COLLECT_CALLBACK": "Offer to have staff call back with answer",
+      "MANAGER_APPROVAL": "Cannot be changed without manager flag in portal"
+    },
+    "placeholder_syntax": {
+      "{{RESTAURANT_NAME}}": "Replaced at runtime with restaurant name",
+      "{{TODAY}}": "Current day of week",
+      "{{CURRENT_TIME}}": "Current time in restaurant timezone"
+    }
+  },
+
+  "categories": {
+    "dietary": {
+      "category_id": "dietary",
+      "display_name": "Dietary & Allergies",
+      "icon": "utensils",
+      "description": "Policies for dietary restrictions and food allergies",
+      "priority": 1,
+      "policies": [
+        {
+          "id": "diet-001",
+          "topic": "Gluten Free Options",
+          "keywords": ["gluten free", "gluten-free", "celiac", "no gluten", "wheat free"],
+          "answer": "We offer several gluten-free options including our grilled salmon, roasted chicken, and a variety of salads. Our servers are trained to guide you through gluten-free choices. Just let them know when you're seated.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "menu",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "diet-002",
+          "topic": "Nut Allergies",
+          "keywords": ["nut allergy", "nut-free", "peanut allergy", "peanut free", "tree nut", "allergic to nuts", "anaphylactic"],
+          "answer": null,
+          "hard_rule": "TRANSFER_IMMEDIATELY",
+          "transfer_reason": "allergy_safety",
+          "transfer_script": "For your safety, I cannot guarantee our kitchen is completely nut-free as we do use nuts in several dishes. Let me connect you with a manager who can discuss our preparation practices and what accommodations we can make.",
+          "source": "safety_protocol",
+          "requires_manager_approval": true,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "diet-003",
+          "topic": "Vegetarian Options",
+          "keywords": ["vegetarian", "veggie", "no meat", "meatless", "meat-free"],
+          "answer": "Absolutely! We have a dedicated vegetarian section on our menu with about eight options including our popular mushroom risotto, eggplant parmesan, and vegetable curry. Your server can also suggest modifications to other dishes.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "menu",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "diet-004",
+          "topic": "Vegan Options",
+          "keywords": ["vegan", "plant-based", "no dairy", "no eggs", "no animal products"],
+          "answer": "We have several vegan-friendly dishes marked on our menu. Our kitchen can also modify many items to be vegan. Just let your server know and they'll guide you through the options.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "menu",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "diet-005",
+          "topic": "Shellfish Allergies",
+          "keywords": ["shellfish allergy", "shellfish-free", "shrimp allergy", "crab allergy", "lobster allergy", "crustacean"],
+          "answer": null,
+          "hard_rule": "TRANSFER_IMMEDIATELY",
+          "transfer_reason": "allergy_safety",
+          "transfer_script": "Shellfish allergies require special attention. Let me connect you with a manager who can discuss our kitchen practices and which dishes would be safe for you.",
+          "source": "safety_protocol",
+          "requires_manager_approval": true,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "diet-006",
+          "topic": "Dairy Free",
+          "keywords": ["dairy free", "dairy-free", "lactose intolerant", "no dairy", "milk allergy", "lactose free"],
+          "answer": "Many of our dishes can be prepared dairy-free. We can substitute dairy in most sauces and sides. Please let your server know about your dietary needs when you arrive and they'll help you navigate the menu.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "menu",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "diet-007",
+          "topic": "Halal or Kosher",
+          "keywords": ["halal", "kosher", "religious dietary", "halal certified", "kosher certified"],
+          "answer": null,
+          "hard_rule": "COLLECT_CALLBACK",
+          "transfer_reason": null,
+          "transfer_script": null,
+          "callback_script": "I want to make sure I give you accurate information about our halal and kosher options. Can I have our manager call you back with specific details about our sourcing and preparation?",
+          "source": "policy",
+          "requires_manager_approval": true,
+          "last_verified": "{{TIMESTAMP}}"
+        }
+      ]
+    },
+
+    "parking": {
+      "category_id": "parking",
+      "display_name": "Parking & Transportation",
+      "icon": "car",
+      "description": "Information about parking options and getting to the restaurant",
+      "priority": 2,
+      "policies": [
+        {
+          "id": "park-001",
+          "topic": "Valet Parking",
+          "keywords": ["valet", "valet parking", "park my car", "parking service"],
+          "answer": "Yes, we offer complimentary valet parking for all dinner guests. Just pull up to our main entrance and our valet team will take care of your car. Valet is available from 5 PM until closing.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "operations",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "park-002",
+          "topic": "Self Parking",
+          "keywords": ["self parking", "parking lot", "where to park", "parking garage", "street parking"],
+          "answer": "We have a parking lot behind the building with about 30 spaces, free for guests. There's also a public parking garage on Oak Street, one block east, which charges three dollars per hour. Street parking is available but limited, especially on weekends.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "operations",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "park-003",
+          "topic": "Wheelchair Accessible Parking",
+          "keywords": ["handicap parking", "accessible parking", "wheelchair parking", "disabled parking", "ADA parking"],
+          "answer": "We have three designated accessible parking spaces right at our front entrance. If those are full, our valet can assist with accessible drop-off and pickup at the door.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "operations",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "park-004",
+          "topic": "Public Transportation",
+          "keywords": ["bus", "subway", "metro", "public transit", "train", "how to get there"],
+          "answer": "We're conveniently located two blocks from the Central Station metro stop. The number 42 bus also stops right outside our door. If you're coming by rideshare, our address is easy to find in any navigation app.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "operations",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        }
+      ]
+    },
+
+    "hours": {
+      "category_id": "hours",
+      "display_name": "Hours & Schedule",
+      "icon": "clock",
+      "description": "Operating hours, holiday schedules, and timing information",
+      "priority": 3,
+      "policies": [
+        {
+          "id": "hours-001",
+          "topic": "Regular Hours",
+          "keywords": ["hours", "open", "close", "what time", "when do you open", "when do you close", "operating hours"],
+          "answer": "We're open Tuesday through Sunday. Lunch is from 11:30 AM to 2:30 PM, and dinner is from 5 PM to 10 PM. We're closed on Mondays. On Fridays and Saturdays, we stay open until 11 PM.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "operations",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}",
+          "_note": "Update this when seasonal hours change"
+        },
+        {
+          "id": "hours-002",
+          "topic": "Holiday Hours",
+          "keywords": ["holiday hours", "christmas", "thanksgiving", "new years", "easter", "special hours"],
+          "answer": null,
+          "hard_rule": "COLLECT_CALLBACK",
+          "transfer_reason": null,
+          "transfer_script": null,
+          "callback_script": "Holiday hours can vary, and I want to make sure I give you the correct information. Can I have someone call you back to confirm our hours for that specific date?",
+          "source": "policy",
+          "requires_manager_approval": true,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "hours-003",
+          "topic": "Kitchen Closing Time",
+          "keywords": ["kitchen close", "last order", "stop serving", "last seating", "late dinner"],
+          "answer": "Our kitchen takes last orders 30 minutes before closing. So on most nights that's 9:30 PM, and on Fridays and Saturdays it's 10:30 PM. I'd recommend arriving at least 45 minutes before closing for a relaxed dining experience.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "operations",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "hours-004",
+          "topic": "Happy Hour",
+          "keywords": ["happy hour", "drink specials", "bar specials", "early bird"],
+          "answer": "Happy hour is Tuesday through Friday from 4 PM to 6 PM at the bar. We have half-price appetizers and discounted cocktails. It's first-come, first-served at the bar, but you're welcome to make a reservation for a table if you prefer.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "promotions",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "hours-005",
+          "topic": "Brunch Hours",
+          "keywords": ["brunch", "weekend brunch", "sunday brunch", "saturday brunch", "brunch time"],
+          "answer": "We serve brunch on Saturdays and Sundays from 10 AM to 2 PM. It's our most popular time, so I definitely recommend making a reservation, especially for parties of four or more.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "operations",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        }
+      ]
+    },
+
+    "cancellation": {
+      "category_id": "cancellation",
+      "display_name": "Reservations & Cancellations",
+      "icon": "calendar-x",
+      "description": "Policies for reservation changes, cancellations, and no-shows",
+      "priority": 4,
+      "policies": [
+        {
+          "id": "cancel-001",
+          "topic": "Standard Cancellation Policy",
+          "keywords": ["cancel", "cancellation", "cancel reservation", "need to cancel"],
+          "answer": "No problem at all. We just ask that you cancel at least 2 hours before your reservation time so we can offer the table to other guests. Would you like me to cancel your reservation now?",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "policy",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "cancel-002",
+          "topic": "Late Cancellation",
+          "keywords": ["last minute cancel", "cancel now", "emergency cancel", "cancel today"],
+          "answer": "I understand things come up. Let me cancel that for you. In the future, we do ask for at least 2 hours notice when possible, but we appreciate you letting us know.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "policy",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "cancel-003",
+          "topic": "Modify Reservation",
+          "keywords": ["change reservation", "modify", "different time", "change date", "reschedule", "move reservation"],
+          "answer": "I can help you with that. Let me first check what we have available. What date and time would work better for you?",
+          "hard_rule": "CHECK_AVAILABILITY",
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "policy",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "cancel-004",
+          "topic": "No-Show Policy",
+          "keywords": ["no show", "missed reservation", "didn't show up", "forgot reservation"],
+          "answer": null,
+          "hard_rule": "TRANSFER_IMMEDIATELY",
+          "transfer_reason": "customer_request",
+          "transfer_script": "Let me connect you with our host who can look into that for you and help sort things out.",
+          "source": "policy",
+          "requires_manager_approval": true,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "cancel-005",
+          "topic": "Large Party Cancellation",
+          "keywords": ["cancel large party", "cancel group", "cancel event", "cancel private dining"],
+          "answer": null,
+          "hard_rule": "TRANSFER_IMMEDIATELY",
+          "transfer_reason": "large_party",
+          "transfer_script": "For group reservations, I'll need to connect you with our events coordinator who can help with changes or cancellations. One moment please.",
+          "source": "policy",
+          "requires_manager_approval": true,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "cancel-006",
+          "topic": "Deposit Refund",
+          "keywords": ["refund deposit", "get deposit back", "deposit refund", "cancel with deposit"],
+          "answer": null,
+          "hard_rule": "TRANSFER_IMMEDIATELY",
+          "transfer_reason": "manager_request",
+          "transfer_script": "For questions about deposits, I'll connect you with a manager who can review your booking and discuss options. One moment please.",
+          "source": "policy",
+          "requires_manager_approval": true,
+          "last_verified": "{{TIMESTAMP}}"
+        }
+      ]
+    },
+
+    "large_party": {
+      "category_id": "large_party",
+      "display_name": "Large Parties & Events",
+      "icon": "users",
+      "description": "Policies for groups, private events, and special occasions",
+      "priority": 5,
+      "policies": [
+        {
+          "id": "party-001",
+          "topic": "Large Party Definition",
+          "keywords": ["large party", "big group", "how many people", "group reservation", "party of"],
+          "answer": "For groups of 8 or more, we have special arrangements including reserved seating areas and optional set menus. Groups over 8 are handled by our events team to ensure everything goes smoothly.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "policy",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "party-002",
+          "topic": "Large Party Booking",
+          "keywords": ["book large party", "reserve for group", "table for 10", "table for 12", "table for 15", "table for 20"],
+          "answer": null,
+          "hard_rule": "TRANSFER_IMMEDIATELY",
+          "transfer_reason": "large_party",
+          "transfer_script": "For groups of 8 or more, I'll connect you with our events coordinator who can discuss menu options, seating arrangements, and any deposit requirements. One moment please.",
+          "source": "policy",
+          "requires_manager_approval": true,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "party-003",
+          "topic": "Private Dining Room",
+          "keywords": ["private room", "private dining", "private event", "private party", "rent room"],
+          "answer": null,
+          "hard_rule": "TRANSFER_IMMEDIATELY",
+          "transfer_reason": "large_party",
+          "transfer_script": "We do have a private dining room that seats up to 24 guests. Let me connect you with our events coordinator who can share availability and pricing details.",
+          "source": "policy",
+          "requires_manager_approval": true,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "party-004",
+          "topic": "Group Deposit",
+          "keywords": ["deposit required", "group deposit", "party deposit", "credit card hold"],
+          "answer": "For groups of 8 or more, we do require a credit card to hold the reservation. For private events, there's typically a deposit. Our events coordinator can explain all the details.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "policy",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "party-005",
+          "topic": "Set Menu for Groups",
+          "keywords": ["set menu", "prix fixe", "group menu", "fixed menu", "preset menu"],
+          "answer": "For groups of 10 or more, we offer set menu options that make service smoother and often provide better value. Menus start at $55 per person. Our events coordinator can walk you through the options.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "policy",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        }
+      ]
+    },
+
+    "specials": {
+      "category_id": "specials",
+      "display_name": "Specials & Promotions",
+      "icon": "tag",
+      "description": "Current specials, promotions, and limited-time offers",
+      "priority": 6,
+      "policies": [
+        {
+          "id": "special-001",
+          "topic": "Daily Specials",
+          "keywords": ["daily special", "today's special", "special today", "chef special", "what's special"],
+          "answer": "Our chef prepares fresh specials daily based on what's in season. I don't have today's specials in front of me, but your server will share them when you arrive. They're always worth trying!",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "menu",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "special-002",
+          "topic": "Wine Specials",
+          "keywords": ["wine special", "wine deal", "bottle special", "wine discount", "wine night"],
+          "answer": "We have half-price bottles of wine every Wednesday. It's a great night to come in if you enjoy exploring our wine list. We also have a rotating featured wine by the glass that changes weekly.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "promotions",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "special-003",
+          "topic": "Birthday or Anniversary",
+          "keywords": ["birthday", "anniversary", "celebration", "special occasion", "celebrating"],
+          "answer": "How wonderful! We'd love to help make it special. Just let your server know when you arrive and we'll take care of a little something. Would you like me to add a note to your reservation?",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "policy",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "special-004",
+          "topic": "Gift Cards",
+          "keywords": ["gift card", "gift certificate", "buy gift card", "purchase gift card"],
+          "answer": "Yes, we offer gift cards in any amount. You can purchase them at the restaurant or through our website. They never expire and can be used for dining, takeout, or private events.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "policy",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "special-005",
+          "topic": "Loyalty Program",
+          "keywords": ["loyalty program", "rewards", "points", "member", "frequent diner"],
+          "answer": "We have a simple loyalty program. Just provide your phone number when you dine and you'll earn points toward complimentary dishes. Ask your server to sign you up on your next visit.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "promotions",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "special-006",
+          "topic": "Discount or Coupon",
+          "keywords": ["discount", "coupon", "promo code", "deal", "promotion"],
+          "answer": null,
+          "hard_rule": "TRANSFER_IMMEDIATELY",
+          "transfer_reason": "customer_request",
+          "transfer_script": "Let me connect you with our host who can check on any current promotions and help with that.",
+          "source": "policy",
+          "requires_manager_approval": true,
+          "last_verified": "{{TIMESTAMP}}"
+        }
+      ]
+    },
+
+    "dress_code": {
+      "category_id": "dress_code",
+      "display_name": "Dress Code & Attire",
+      "icon": "shirt",
+      "description": "Guidelines for appropriate attire",
+      "priority": 7,
+      "policies": [
+        {
+          "id": "dress-001",
+          "topic": "General Dress Code",
+          "keywords": ["dress code", "what to wear", "attire", "dress up", "casual"],
+          "answer": "We have a smart casual dress code. Collared shirts, nice jeans, and dresses are all appropriate. We just ask that guests avoid athletic wear, flip-flops, and beachwear.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "policy",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "dress-002",
+          "topic": "Private Dining Dress Code",
+          "keywords": ["event dress code", "private room attire", "formal"],
+          "answer": "For private dining events, we recommend business casual or cocktail attire, though it's ultimately up to the host. Let us know if you'd like us to include dress code information with your invitations.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "policy",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "dress-003",
+          "topic": "Shorts Allowed",
+          "keywords": ["shorts", "can I wear shorts", "shorts okay"],
+          "answer": "Dress shorts like chinos or khakis are fine for lunch and casual dinners. For weekend dinner service, we prefer long pants, but we won't turn you away for nice shorts.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "policy",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        }
+      ]
+    },
+
+    "children": {
+      "category_id": "children",
+      "display_name": "Children & Families",
+      "icon": "baby",
+      "description": "Family-friendly policies and amenities",
+      "priority": 8,
+      "policies": [
+        {
+          "id": "child-001",
+          "topic": "Kids Menu",
+          "keywords": ["kids menu", "children's menu", "child menu", "food for kids"],
+          "answer": "Yes, we have a kids menu with smaller portions of favorites like pasta, chicken tenders, and grilled cheese. All kids meals come with a choice of side and a drink.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "menu",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "child-002",
+          "topic": "High Chairs and Boosters",
+          "keywords": ["high chair", "booster seat", "baby seat", "toddler seat"],
+          "answer": "Absolutely, we have high chairs and booster seats available. Just let me add a note to your reservation so we have one ready at your table.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "operations",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "child-003",
+          "topic": "Stroller Access",
+          "keywords": ["stroller", "pram", "baby carriage", "bring stroller"],
+          "answer": "Strollers are welcome. We can usually accommodate them at your table, or we have a coat check area where they can be stored safely if you prefer.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "operations",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "child-004",
+          "topic": "Family-Friendly Times",
+          "keywords": ["best time for kids", "family friendly", "early dinner with kids", "bring children"],
+          "answer": "We love having families! For dining with young children, I'd recommend our early seating between 5 and 6:30 PM. It tends to be a bit more relaxed and the kitchen is less rushed.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "operations",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        }
+      ]
+    },
+
+    "accessibility": {
+      "category_id": "accessibility",
+      "display_name": "Accessibility",
+      "icon": "wheelchair",
+      "description": "Accessibility features and accommodations",
+      "priority": 9,
+      "policies": [
+        {
+          "id": "access-001",
+          "topic": "Wheelchair Access",
+          "keywords": ["wheelchair", "wheelchair accessible", "mobility", "handicap accessible", "ADA"],
+          "answer": "Yes, we're fully wheelchair accessible. We have a ramp at the main entrance, accessible restrooms, and plenty of space between tables. Just let me note that on your reservation so we seat you at an easily accessible table.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "operations",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "access-002",
+          "topic": "Service Animals",
+          "keywords": ["service dog", "service animal", "guide dog", "assistance animal"],
+          "answer": "Service animals are always welcome. There's no need to let us know in advance, but if you'd like, I can note it so we seat you in an area with extra space.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "policy",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "access-003",
+          "topic": "Hearing Accommodations",
+          "keywords": ["hearing impaired", "deaf", "hard of hearing", "hearing loop"],
+          "answer": "We can seat you in a quieter area of the restaurant and our staff is happy to communicate via written notes if helpful. Just let your server know what would work best for you.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "operations",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "access-004",
+          "topic": "Visual Accommodations",
+          "keywords": ["blind", "visually impaired", "braille menu", "large print menu"],
+          "answer": "We have large print menus available, and our servers are happy to read the menu aloud. If you'd like a large print menu ready when you arrive, I can add that note to your reservation.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "operations",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        }
+      ]
+    },
+
+    "payment": {
+      "category_id": "payment",
+      "display_name": "Payment & Billing",
+      "icon": "credit-card",
+      "description": "Payment methods, splitting checks, and billing policies",
+      "priority": 10,
+      "policies": [
+        {
+          "id": "pay-001",
+          "topic": "Payment Methods",
+          "keywords": ["payment", "pay with", "accept credit card", "apple pay", "cash"],
+          "answer": "We accept all major credit cards, debit cards, Apple Pay, and Google Pay. We also accept cash, of course.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "operations",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "pay-002",
+          "topic": "Split Checks",
+          "keywords": ["split check", "separate checks", "split bill", "pay separately"],
+          "answer": "We can split checks up to 4 ways. Just let your server know at the beginning of your meal so they can track everything accordingly.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "policy",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "pay-003",
+          "topic": "Gratuity Policy",
+          "keywords": ["gratuity", "tip", "service charge", "automatic tip"],
+          "answer": "For parties of 6 or more, we add a 20% service charge. For smaller groups, gratuity is at your discretion. Our staff truly appreciates your generosity.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "policy",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "pay-004",
+          "topic": "Redeem Gift Card",
+          "keywords": ["use gift card", "redeem gift card", "pay with gift card", "gift card balance"],
+          "answer": "Gift cards can be applied to your check at the end of your meal. Just hand it to your server with your payment. If there's a remaining balance, they'll let you know.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "operations",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        }
+      ]
+    },
+
+    "takeout_delivery": {
+      "category_id": "takeout_delivery",
+      "display_name": "Takeout & Delivery",
+      "icon": "package",
+      "description": "Policies for to-go orders and delivery options",
+      "priority": 11,
+      "policies": [
+        {
+          "id": "togo-001",
+          "topic": "Takeout Available",
+          "keywords": ["takeout", "to go", "carry out", "pick up", "order ahead"],
+          "answer": "Yes, we offer takeout. You can order by calling us directly or through our website. Orders are usually ready in 20 to 30 minutes depending on how busy we are.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "operations",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "togo-002",
+          "topic": "Delivery Options",
+          "keywords": ["delivery", "deliver", "uber eats", "doordash", "grubhub"],
+          "answer": "We partner with DoorDash and Uber Eats for delivery. You can find us on either app. We don't do our own delivery, but these services cover most of the local area.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "operations",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "togo-003",
+          "topic": "Curbside Pickup",
+          "keywords": ["curbside", "curbside pickup", "car pickup", "wait in car"],
+          "answer": "We do offer curbside pickup. Just give us a call when you arrive and we'll bring your order right out to your car.",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "operations",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "togo-004",
+          "topic": "Catering",
+          "keywords": ["catering", "cater event", "food for party", "large order", "office catering"],
+          "answer": null,
+          "hard_rule": "TRANSFER_IMMEDIATELY",
+          "transfer_reason": "large_party",
+          "transfer_script": "For catering inquiries, let me connect you with our events team who handles all off-site orders and can put together a custom menu for your needs.",
+          "source": "policy",
+          "requires_manager_approval": true,
+          "last_verified": "{{TIMESTAMP}}"
+        }
+      ]
+    },
+
+    "complaints": {
+      "category_id": "complaints",
+      "display_name": "Feedback & Complaints",
+      "icon": "message-circle",
+      "description": "How to handle feedback, complaints, and concerns",
+      "priority": 12,
+      "policies": [
+        {
+          "id": "complaint-001",
+          "topic": "General Complaint",
+          "keywords": ["complaint", "bad experience", "unhappy", "disappointed", "terrible", "worst"],
+          "answer": null,
+          "hard_rule": "TRANSFER_IMMEDIATELY",
+          "transfer_reason": "complaint",
+          "transfer_script": "I'm sorry to hear you had a less than perfect experience. Let me connect you with a manager who can help address your concerns directly.",
+          "source": "policy",
+          "requires_manager_approval": true,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "complaint-002",
+          "topic": "Food Quality Issue",
+          "keywords": ["food was bad", "cold food", "wrong order", "undercooked", "overcooked"],
+          "answer": null,
+          "hard_rule": "TRANSFER_IMMEDIATELY",
+          "transfer_reason": "complaint",
+          "transfer_script": "I apologize for the issue with your meal. Let me connect you with a manager right away who can make this right.",
+          "source": "policy",
+          "requires_manager_approval": true,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "complaint-003",
+          "topic": "Service Complaint",
+          "keywords": ["rude server", "bad service", "slow service", "ignored", "waiter was"],
+          "answer": null,
+          "hard_rule": "TRANSFER_IMMEDIATELY",
+          "transfer_reason": "complaint",
+          "transfer_script": "That's not the experience we want you to have. Let me connect you with our manager who takes service feedback very seriously.",
+          "source": "policy",
+          "requires_manager_approval": true,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "complaint-004",
+          "topic": "Positive Feedback",
+          "keywords": ["great experience", "amazing", "wonderful", "thank server", "compliment"],
+          "answer": "That's wonderful to hear! I'll make sure to pass that along to our team. We really appreciate you taking the time to share that. Is there anything else I can help you with today?",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "policy",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        },
+        {
+          "id": "complaint-005",
+          "topic": "Leave a Review",
+          "keywords": ["leave review", "write review", "google review", "yelp", "tripadvisor"],
+          "answer": "We'd love that! You can find us on Google, Yelp, and TripAdvisor. Honest reviews help other diners discover us and help us improve. Thank you for considering it!",
+          "hard_rule": null,
+          "transfer_reason": null,
+          "transfer_script": null,
+          "source": "policy",
+          "requires_manager_approval": false,
+          "last_verified": "{{TIMESTAMP}}"
+        }
+      ]
+    }
+  },
+
+  "_portal_integration": {
+    "description": "Schema information for portal CRUD operations",
+    "endpoints": {
+      "get_all": "GET /api/knowledge-base",
+      "get_category": "GET /api/knowledge-base/:categoryId",
+      "get_policy": "GET /api/knowledge-base/:categoryId/:policyId",
+      "create_policy": "POST /api/knowledge-base/:categoryId",
+      "update_policy": "PUT /api/knowledge-base/:categoryId/:policyId",
+      "delete_policy": "DELETE /api/knowledge-base/:categoryId/:policyId"
+    },
+    "validation_rules": {
+      "id": "Must be unique within category, format: {category-prefix}-{3-digit-number}",
+      "topic": "Required, 3-100 characters",
+      "keywords": "Array of 1-20 strings, each 2-50 characters",
+      "answer": "Required if hard_rule is null, max 1000 characters",
+      "hard_rule": "One of: null, TRANSFER_IMMEDIATELY, CHECK_AVAILABILITY, COLLECT_CALLBACK, MANAGER_APPROVAL",
+      "transfer_reason": "Required if hard_rule is TRANSFER_IMMEDIATELY",
+      "transfer_script": "Required if hard_rule is TRANSFER_IMMEDIATELY, max 500 characters",
+      "requires_manager_approval": "Boolean, if true only managers can edit"
+    },
+    "audit_fields": {
+      "created_at": "Auto-set on creation",
+      "updated_at": "Auto-set on update",
+      "updated_by": "User email who made the change",
+      "last_verified": "Date when content was last verified as accurate"
+    }
+  },
+
+  "_ai_usage": {
+    "description": "How the AI assistant uses this knowledge base",
+    "lookup_process": [
+      "1. Extract key terms from caller's question",
+      "2. Match against keywords arrays in all policies",
+      "3. Return best matching policy",
+      "4. If hard_rule is set, execute that behavior",
+      "5. Otherwise, speak the 'answer' field naturally"
+    ],
+    "customization_notes": [
+      "AI will paraphrase answers slightly for natural conversation",
+      "Transfer scripts are spoken verbatim before calling transfer_call",
+      "Keywords should include common misspellings and variations",
+      "Answers should be written for speaking, not reading (avoid abbreviations)"
+    ],
+    "fallback_behavior": "If no policy matches, AI should offer to transfer to staff or take a callback"
+  }
+}

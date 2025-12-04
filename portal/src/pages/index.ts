@@ -1,0 +1,6 @@
+export { Dashboard } from './Dashboard'
+export { Calls } from './Calls'
+export { Bookings } from './Bookings'
+export { Callbacks } from './Callbacks'
+export { Analytics } from './Analytics'
+export { Settings } from './Settings'

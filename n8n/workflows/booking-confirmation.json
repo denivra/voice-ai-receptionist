@@ -1,0 +1,855 @@
+{
+  "name": "Voice AI - Booking Confirmation SMS",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "booking-confirmation",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "b1c2d3e4-0001-4000-8000-000000000001",
+      "name": "Confirmation Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 400],
+      "webhookId": "booking-confirmation-webhook",
+      "notes": "Internal webhook called by main voice-ai-webhook workflow after successful booking"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// VALIDATE INTERNAL REQUEST\n// Verify this is an internal call with proper secret\n// ============================================================\n\nconst headers = $input.item.json.headers;\nconst body = $input.item.json.body;\n\n// Verify internal secret\nconst expectedSecret = $env.N8N_INTERNAL_SECRET;\nconst providedSecret = headers['x-internal-secret'] || headers['X-Internal-Secret'];\n\nif (!providedSecret || providedSecret !== expectedSecret) {\n  return {\n    json: {\n      error: true,\n      statusCode: 401,\n      message: 'Unauthorized: Invalid internal secret'\n    }\n  };\n}\n\n// Validate required fields\nconst requiredFields = ['reservation_id', 'customer_phone', 'customer_name', 'datetime', 'party_size'];\nconst missingFields = requiredFields.filter(field => !body[field]);\n\nif (missingFields.length > 0) {\n  return {\n    json: {\n      error: true,\n      statusCode: 400,\n      message: `Missing required fields: ${missingFields.join(', ')}`\n    }\n  };\n}\n\n// Check SMS consent - TCPA compliance\nif (body.sms_consent === false) {\n  return {\n    json: {\n      error: false,\n      skipSms: true,\n      reason: 'no_consent',\n      message: 'Customer did not consent to SMS notifications'\n    }\n  };\n}\n\n// Pass through validated data\nreturn {\n  json: {\n    error: false,\n    skipSms: false,\n    reservationId: body.reservation_id,\n    confirmationCode: body.confirmation_code,\n    customerPhone: body.customer_phone,\n    customerName: body.customer_name,\n    partySize: body.party_size,\n    datetime: body.datetime,\n    restaurantId: body.restaurant_id,\n    smsConsent: body.sms_consent !== false\n  }\n};"
+      },
+      "id": "b1c2d3e4-0001-4000-8000-000000000002",
+      "name": "Validate Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "auth-error",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b1c2d3e4-0001-4000-8000-000000000003",
+      "name": "Request Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, error: $json.message }) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode || 400 }}"
+        }
+      },
+      "id": "b1c2d3e4-0001-4000-8000-000000000004",
+      "name": "Respond Validation Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [900, 280]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "skip-sms",
+              "leftValue": "={{ $json.skipSms }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b1c2d3e4-0001-4000-8000-000000000005",
+      "name": "SMS Consent Given?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 480]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, sms_sent: false, reason: $json.reason }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "b1c2d3e4-0001-4000-8000-000000000006",
+      "name": "Respond Skip SMS",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1120, 360]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/restaurants",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "=eq.{{ $json.restaurantId }}"
+            },
+            {
+              "name": "select",
+              "value": "name,phone,settings"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "b1c2d3e4-0001-4000-8000-000000000007",
+      "name": "Get Restaurant Details",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 560],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 500,
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SUPABASE_HEADER_AUTH_ID",
+          "name": "Supabase Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// FORMAT SMS MESSAGE\n// Create TCPA-compliant confirmation message under 160 chars\n// ============================================================\n\nconst booking = $('SMS Consent Given?').item.json;\nconst restaurantData = $input.item.json;\n\n// Get restaurant info (first result from array)\nconst restaurant = Array.isArray(restaurantData) ? restaurantData[0] : restaurantData;\nconst restaurantName = restaurant?.name || 'the restaurant';\nconst restaurantPhone = restaurant?.phone || '';\n\n// Parse datetime for formatting\nconst reservationDate = new Date(booking.datetime);\n\n// Format date: \"Sat, Dec 14\"\nconst dateStr = reservationDate.toLocaleDateString('en-US', {\n  weekday: 'short',\n  month: 'short',\n  day: 'numeric'\n});\n\n// Format time: \"7:00 PM\"\nconst timeStr = reservationDate.toLocaleTimeString('en-US', {\n  hour: 'numeric',\n  minute: '2-digit',\n  hour12: true\n});\n\n// Get first name only for shorter message\nconst firstName = booking.customerName.split(' ')[0];\n\n// Build SMS message - keep under 160 characters for single SMS\n// Template: \"Hi {name}! Confirmed: {restaurant} {date} {time}, party of {size}. Code: {code}. Reply CANCEL to cancel.\"\nlet message = `Hi ${firstName}! Confirmed: ${restaurantName} ${dateStr} ${timeStr}, party of ${booking.partySize}. Code: ${booking.confirmationCode}.`;\n\n// Add cancel instructions (TCPA compliance)\nmessage += ' Reply CANCEL to cancel.';\n\n// Check message length - if over 160, create a shorter version\nif (message.length > 160) {\n  // Shorter version without restaurant name\n  message = `Confirmed: ${dateStr} ${timeStr}, party of ${booking.partySize}. Code: ${booking.confirmationCode}. Reply CANCEL to cancel.`;\n}\n\n// If still over 160, use minimal version\nif (message.length > 160) {\n  message = `Reservation confirmed ${dateStr} ${timeStr} for ${booking.partySize}. Code: ${booking.confirmationCode}. CANCEL to cancel.`;\n}\n\n// Determine if multi-part SMS is needed\nconst isMultiPart = message.length > 160;\nconst segmentCount = Math.ceil(message.length / 153); // 153 chars per segment in multi-part\n\nreturn {\n  json: {\n    to: booking.customerPhone,\n    message: message,\n    messageLength: message.length,\n    isMultiPart: isMultiPart,\n    segmentCount: segmentCount,\n    reservationId: booking.reservationId,\n    confirmationCode: booking.confirmationCode,\n    customerName: booking.customerName,\n    restaurantName: restaurantName,\n    restaurantPhone: restaurantPhone,\n    datetime: booking.datetime\n  }\n};"
+      },
+      "id": "b1c2d3e4-0001-4000-8000-000000000008",
+      "name": "Format SMS Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 560]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.twilio.com/2010-04-01/Accounts/{{ $env.TWILIO_ACCOUNT_SID }}/Messages.json",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "To",
+              "value": "={{ $json.to }}"
+            },
+            {
+              "name": "From",
+              "value": "={{ $env.TWILIO_PHONE_NUMBER }}"
+            },
+            {
+              "name": "Body",
+              "value": "={{ $json.message }}"
+            },
+            {
+              "name": "StatusCallback",
+              "value": "={{ $env.N8N_WEBHOOK_URL }}/webhook/sms-status"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "b1c2d3e4-0001-4000-8000-000000000009",
+      "name": "Send SMS via Twilio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 560],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000,
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "TWILIO_BASIC_AUTH_ID",
+          "name": "Twilio Basic Auth"
+        }
+      },
+      "notes": "Uses Twilio REST API directly for more control over error handling"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "twilio-success",
+              "leftValue": "={{ $json.statusCode >= 200 && $json.statusCode < 300 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b1c2d3e4-0001-4000-8000-000000000010",
+      "name": "Twilio Success?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1780, 560]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/reservations",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "=eq.{{ $('Format SMS Message').item.json.reservationId }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"confirmation_sent_at\": \"{{ new Date().toISOString() }}\",\n  \"confirmation_method\": \"sms\",\n  \"sms_sid\": \"{{ $json.body?.sid || '' }}\"\n}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "b1c2d3e4-0001-4000-8000-000000000011",
+      "name": "Update Reservation - SMS Sent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2000, 480],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 500,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SUPABASE_HEADER_AUTH_ID",
+          "name": "Supabase Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// FORMAT SUCCESS RESPONSE\n// ============================================================\n\nconst smsData = $('Format SMS Message').item.json;\nconst twilioResponse = $('Send SMS via Twilio').item.json;\n\nreturn {\n  json: {\n    success: true,\n    sms_sent: true,\n    message_sid: twilioResponse.body?.sid,\n    to: smsData.to,\n    message_length: smsData.messageLength,\n    segments: smsData.segmentCount,\n    reservation_id: smsData.reservationId,\n    confirmation_code: smsData.confirmationCode\n  }\n};"
+      },
+      "id": "b1c2d3e4-0001-4000-8000-000000000012",
+      "name": "Format Success Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2220, 480]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "b1c2d3e4-0001-4000-8000-000000000013",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2440, 480]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// HANDLE TWILIO ERROR\n// Log error and prepare callback creation\n// ============================================================\n\nconst smsData = $('Format SMS Message').item.json;\nconst twilioResponse = $input.item.json;\n\n// Extract Twilio error details\nlet errorCode = 'UNKNOWN';\nlet errorMessage = 'SMS delivery failed';\n\nif (twilioResponse.body) {\n  errorCode = twilioResponse.body.code || twilioResponse.body.error_code || errorCode;\n  errorMessage = twilioResponse.body.message || twilioResponse.body.error_message || errorMessage;\n}\n\n// Check for specific Twilio errors\nconst isInvalidNumber = errorCode === 21211 || errorCode === 21614 || errorCode === 21217;\nconst isBlacklisted = errorCode === 21610;\nconst isUndeliverable = errorCode === 30003 || errorCode === 30005 || errorCode === 30006;\n\nreturn {\n  json: {\n    error: true,\n    errorCode: errorCode,\n    errorMessage: errorMessage,\n    isInvalidNumber: isInvalidNumber,\n    isBlacklisted: isBlacklisted,\n    isUndeliverable: isUndeliverable,\n    reservationId: smsData.reservationId,\n    confirmationCode: smsData.confirmationCode,\n    customerPhone: smsData.to,\n    customerName: smsData.customerName,\n    restaurantName: smsData.restaurantName,\n    datetime: smsData.datetime,\n    httpStatus: twilioResponse.statusCode\n  }\n};"
+      },
+      "id": "b1c2d3e4-0001-4000-8000-000000000014",
+      "name": "Handle Twilio Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 660]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/error_logs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"source\": \"booking-confirmation\",\n  \"error_type\": \"twilio_error\",\n  \"error_code\": \"{{ $json.errorCode }}\",\n  \"error_message\": \"{{ $json.errorMessage }}\",\n  \"error_data\": {\n    \"reservation_id\": \"{{ $json.reservationId }}\",\n    \"customer_phone\": \"{{ $json.customerPhone }}\",\n    \"http_status\": {{ $json.httpStatus || 0 }}\n  },\n  \"created_at\": \"{{ new Date().toISOString() }}\"\n}",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "id": "b1c2d3e4-0001-4000-8000-000000000015",
+      "name": "Log Error to Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2220, 660],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SUPABASE_HEADER_AUTH_ID",
+          "name": "Supabase Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/callbacks",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"restaurant_id\": \"{{ $('SMS Consent Given?').item.json.restaurantId || $env.DEFAULT_RESTAURANT_ID }}\",\n  \"caller_phone\": \"{{ $('Handle Twilio Error').item.json.customerPhone }}\",\n  \"reason\": \"sms_confirmation_failed\",\n  \"notes\": \"SMS confirmation failed for reservation {{ $('Handle Twilio Error').item.json.confirmationCode }}. Error: {{ $('Handle Twilio Error').item.json.errorMessage }}. Please call customer to confirm manually.\",\n  \"priority\": \"normal\",\n  \"status\": \"pending\",\n  \"created_at\": \"{{ new Date().toISOString() }}\"\n}",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "id": "b1c2d3e4-0001-4000-8000-000000000016",
+      "name": "Create Callback for Manual Confirmation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2440, 660],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 500,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SUPABASE_HEADER_AUTH_ID",
+          "name": "Supabase Auth"
+        }
+      },
+      "notes": "Create callback record so staff can manually confirm the booking"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/reservations",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "=eq.{{ $('Handle Twilio Error').item.json.reservationId }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"confirmation_method\": \"pending_manual\",\n  \"notes\": \"SMS failed: {{ $('Handle Twilio Error').item.json.errorMessage }}. Callback created for manual confirmation.\"\n}",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "id": "b1c2d3e4-0001-4000-8000-000000000017",
+      "name": "Update Reservation - SMS Failed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2660, 660],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SUPABASE_HEADER_AUTH_ID",
+          "name": "Supabase Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"sms_sent\": false,\n  \"error_code\": \"{{ $('Handle Twilio Error').item.json.errorCode }}\",\n  \"error_message\": \"{{ $('Handle Twilio Error').item.json.errorMessage }}\",\n  \"callback_created\": true,\n  \"reservation_id\": \"{{ $('Handle Twilio Error').item.json.reservationId }}\",\n  \"note\": \"Booking confirmed but SMS failed. Callback created for manual confirmation.\"\n}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "b1c2d3e4-0001-4000-8000-000000000018",
+      "name": "Respond SMS Failed (Graceful)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2880, 660],
+      "notes": "Return success=true even when SMS fails - booking is still valid, just needs manual confirmation"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "blacklisted",
+              "leftValue": "={{ $json.isBlacklisted }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b1c2d3e4-0001-4000-8000-000000000019",
+      "name": "Is Blacklisted?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2220, 820],
+      "notes": "Check if customer has opted out via Twilio STOP"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/customers",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "phone",
+              "value": "=eq.{{ $('Handle Twilio Error').item.json.customerPhone }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"sms_consent\": false,\n  \"sms_consent_updated_at\": \"{{ new Date().toISOString() }}\",\n  \"notes\": \"SMS consent revoked - customer opted out via Twilio STOP\"\n}",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "id": "b1c2d3e4-0001-4000-8000-000000000020",
+      "name": "Update Customer SMS Consent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2440, 820],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SUPABASE_HEADER_AUTH_ID",
+          "name": "Supabase Auth"
+        }
+      },
+      "notes": "Update customer record to prevent future SMS attempts (TCPA compliance)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// HANDLE RESTAURANT FETCH ERROR\n// Continue with default values if restaurant lookup fails\n// ============================================================\n\nconst booking = $('SMS Consent Given?').item.json;\n\n// Use default values if restaurant fetch failed\nreturn {\n  json: [{\n    name: 'the restaurant',\n    phone: '',\n    settings: {}\n  }]\n};"
+      },
+      "id": "b1c2d3e4-0001-4000-8000-000000000021",
+      "name": "Use Default Restaurant",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 720],
+      "notes": "Fallback if restaurant lookup fails - still send SMS with generic name"
+    }
+  ],
+  "connections": {
+    "Confirmation Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Request": {
+      "main": [
+        [
+          {
+            "node": "Request Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Request Valid?": {
+      "main": [
+        [
+          {
+            "node": "Respond Validation Error",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "SMS Consent Given?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SMS Consent Given?": {
+      "main": [
+        [
+          {
+            "node": "Respond Skip SMS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get Restaurant Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Restaurant Details": {
+      "main": [
+        [
+          {
+            "node": "Format SMS Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Use Default Restaurant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Use Default Restaurant": {
+      "main": [
+        [
+          {
+            "node": "Format SMS Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format SMS Message": {
+      "main": [
+        [
+          {
+            "node": "Send SMS via Twilio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send SMS via Twilio": {
+      "main": [
+        [
+          {
+            "node": "Twilio Success?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Twilio Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Twilio Success?": {
+      "main": [
+        [
+          {
+            "node": "Update Reservation - SMS Sent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Twilio Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Reservation - SMS Sent": {
+      "main": [
+        [
+          {
+            "node": "Format Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Success Response": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Twilio Error": {
+      "main": [
+        [
+          {
+            "node": "Log Error to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Error to Supabase": {
+      "main": [
+        [
+          {
+            "node": "Is Blacklisted?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Blacklisted?": {
+      "main": [
+        [
+          {
+            "node": "Update Customer SMS Consent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Callback for Manual Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Customer SMS Consent": {
+      "main": [
+        [
+          {
+            "node": "Create Callback for Manual Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Callback for Manual Confirmation": {
+      "main": [
+        [
+          {
+            "node": "Update Reservation - SMS Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Reservation - SMS Failed": {
+      "main": [
+        [
+          {
+            "node": "Respond SMS Failed (Graceful)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionTimeout": 60,
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "id": "tag-voice-ai",
+      "name": "voice-ai"
+    },
+    {
+      "id": "tag-sms",
+      "name": "sms"
+    },
+    {
+      "id": "tag-tcpa",
+      "name": "tcpa-compliant"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2024-01-15T00:00:00.000Z",
+  "versionId": "1.0.0",
+  "meta": {
+    "templateId": "booking-confirmation-sms",
+    "instanceId": "voice-ai-receptionist",
+    "notes": "TCPA COMPLIANCE NOTES:\n\n1. SMS Consent Verification: This workflow checks sms_consent before sending any SMS. If consent is false, the SMS is skipped entirely.\n\n2. Opt-Out Handling: If Twilio returns error code 21610 (blacklisted/opted-out), this workflow automatically updates the customer's sms_consent to false to prevent future SMS attempts.\n\n3. Cancel Instructions: All SMS messages include 'Reply CANCEL to cancel' as required by TCPA.\n\n4. Message Length: Messages are kept under 160 characters when possible to avoid multi-part SMS charges and ensure deliverability.\n\n5. Graceful Failure: If SMS fails, the booking is NOT cancelled. Instead, a callback record is created for staff to manually confirm the reservation by phone.\n\n6. Audit Trail: All SMS attempts (successful or failed) are logged for compliance auditing.\n\nIMPORTANT: Ensure your Twilio number is registered for A2P 10DLC messaging to comply with carrier requirements for business SMS."
+  }
+}
